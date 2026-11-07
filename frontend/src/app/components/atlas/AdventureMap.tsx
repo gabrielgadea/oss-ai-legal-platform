@@ -6,7 +6,9 @@ import type { AtlasWorldStats } from "@/app/lib/mikeApi";
 import { CONTENT_VOLUME_LABELS, PLACES, PLACE_BY_ID, POPULATION_LABELS } from "@/app/lib/atlas/catalog";
 import { formatMinutes } from "@/app/lib/atlas/metrics";
 import { scoresFor, TERRAIN_INFO } from "@/app/lib/atlas/scoring";
-import { FOG_CELL, generateMarks, reachTowards, type Budget, type MoveResult } from "@/app/lib/atlas/expedition";
+import { FOG_CELL, generateMarks, planRoute, type Budget, type MoveResult } from "@/app/lib/atlas/expedition";
+import { actionForKey, pinchCamera, type PinchStart } from "@/app/lib/atlas/input";
+import { mapSfx } from "@/app/lib/atlas/sfx";
 import {
     BIOME_STYLE,
     REALM_BIOME,
@@ -686,11 +688,24 @@ interface Fx {
 }
 
 interface HeroAnim {
-    from: Pt;
+    /** Polilinha percorrida (rota pelo terreno) e comprimentos acumulados. */
+    path: Pt[];
+    cum: number[];
     to: Pt;
     t0: number;
     dur: number;
     onArrive: (() => void)[];
+}
+
+/** Ponto e direção a uma distância `s` ao longo da polilinha. */
+function alongPath(path: Pt[], cum: number[], s: number): { p: Pt; dir: Pt } {
+    let k = 1;
+    while (k < path.length - 1 && cum[k] < s) k++;
+    const a = path[k - 1], b = path[k] ?? a;
+    const seg = cum[k] - cum[k - 1] || 1;
+    const t = Math.max(0, Math.min(1, (s - cum[k - 1]) / seg));
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { p: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, dir: { x: (b.x - a.x) / len, y: (b.y - a.y) / len } };
 }
 
 function drawFx(ctx: Ctx, f: Fx, now: number) {
@@ -852,6 +867,18 @@ export function AdventureMap(props: Props) {
         }
     });
     const reduceMotion = reduceOverride ?? prefersReduced;
+    // Som: desligado por padrão (0); o contexto de áudio só nasce num gesto do usuário.
+    const [volume, setVolume] = useState<number>(() => {
+        try {
+            const v = Number(window.localStorage.getItem("atlas:sound"));
+            return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+        } catch {
+            return 0;
+        }
+    });
+    useEffect(() => {
+        mapSfx.setVolume(volume);
+    }, [volume]);
 
     // ── Estado visual em refs (sem re-render do React a cada quadro) ──
     const propsRef = useRef(props);
@@ -864,6 +891,8 @@ export function AdventureMap(props: Props) {
     const heroRef = useRef<Pt | null>(null); // posição DESENHADA do Cartógrafo
     const heroAnimRef = useRef<HeroAnim | null>(null);
     const arrivalQueueRef = useRef<(() => void)[]>([]);
+    const pendingPathRef = useRef<Pt[] | null>(null);
+    const stepAccRef = useRef(0);
     const fogShownRef = useRef<string[] | null>(null); // névoa exibida (atualiza na chegada)
     const pendingFogRef = useRef<string[] | null>(null);
     const chestsShownRef = useRef<string[] | null>(null);
@@ -885,6 +914,9 @@ export function AdventureMap(props: Props) {
     const lastTRef = useRef(0);
     const perfRef = useRef<number[] | null>(null);
     const drag = useRef<{ sx: number; sy: number; cx: number; cy: number; moved: boolean } | null>(null);
+    const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const pinchRef = useRef<PinchStart | null>(null);
+    const gestureRef = useRef(false);
 
     const discoveredTowns = useMemo(() => adv.world.territories.filter((t) => discovered.has(t.placeId)), [adv, discovered]);
 
@@ -1097,19 +1129,29 @@ export function AdventureMap(props: Props) {
             const exp = p.expedition;
             const hero = heroRef.current;
             if (exp && hero && ptr && p.leagues && !heroAnimRef.current && !drag.current?.moved) {
-                const total = Math.hypot(ptr.x - hero.x, ptr.y - hero.y);
-                if (total >= 18) drawRoute(total);
+                if (Math.hypot(ptr.x - hero.x, ptr.y - hero.y) >= 18) drawRoute();
             }
-            function drawRoute(total: number) {
-                if (!exp || !hero || !ptr || !p.leagues || !cam) return;
-                const reach = reachTowards(exp.cartographer, ptr, p.leagues.available, adv.world, p.discovered);
-                const reachLen = Math.hypot(reach.point.x - hero.x, reach.point.y - hero.y);
-                const ang = Math.atan2(ptr.y - hero.y, ptr.x - hero.x);
+            function drawRoute() {
+                if (!exp || !ptr || !p.leagues || !cam) return;
+                // rota pelo terreno (campo de Dijkstra em cache: só refaz o caminho de volta)
+                const plan = planRoute(exp, ptr, p.leagues.available, adv.world);
+                const reach = plan.reach;
+                const pts = plan.points;
+                const cum = [0];
+                for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+                const total = cum[cum.length - 1];
                 for (let d = 16; d < total; d += 16) {
+                    const at = alongPath(pts, cum, d);
+                    // custo acumulado no ponto (interpolado no trecho)
+                    let k = 1;
+                    while (k < cum.length - 1 && cum[k] < d) k++;
+                    const f = (d - cum[k - 1]) / (cum[k] - cum[k - 1] || 1);
+                    const costHere = plan.costs[k - 1] + (plan.costs[k] - plan.costs[k - 1]) * f;
+                    const ang = Math.atan2(at.dir.y, at.dir.x);
                     ctx.save();
-                    ctx.translate(hero.x + Math.cos(ang) * d, hero.y + Math.sin(ang) * d);
+                    ctx.translate(at.p.x, at.p.y);
                     ctx.rotate(ang);
-                    ctx.fillStyle = d <= reachLen ? "#46d65a" : "#e24a3b";
+                    ctx.fillStyle = costHere <= p.leagues.available + 1e-6 ? "#46d65a" : "#e24a3b";
                     ctx.strokeStyle = "rgba(0,0,0,0.6)";
                     ctx.lineWidth = 0.8;
                     ctx.beginPath();
@@ -1125,7 +1167,14 @@ export function AdventureMap(props: Props) {
                 const lsx = (reach.point.x - cam.x) * cam.zoom;
                 const lsy = (reach.point.y - cam.y) * cam.zoom;
                 ctx.setTransform(dpr, 0, 0, dpr, shake.x * dpr, shake.y * dpr);
-                label(ctx, `${Math.ceil(reach.cost)} léguas`, lsx, lsy - 14, 13, reach.truncated ? "#ffb3a8" : "#c8ffcf");
+                label(
+                    ctx,
+                    reach.truncated ? `${Math.floor(reach.cost)} de ${Math.ceil(plan.total)} léguas` : `${Math.ceil(reach.cost)} léguas`,
+                    lsx,
+                    lsy - 14,
+                    13,
+                    reach.truncated ? "#ffb3a8" : "#c8ffcf",
+                );
                 ctx.setTransform(k, 0, 0, k, -cam.x * k + shake.x * dpr, -cam.y * k + shake.y * dpr);
             }
 
@@ -1209,10 +1258,16 @@ export function AdventureMap(props: Props) {
             if (anim) {
                 const e = anim.dur <= 0 ? 1 : Math.min(1, (now - anim.t0) / anim.dur);
                 const v = easeInOutCubic(e);
-                heroRef.current = { x: anim.from.x + (anim.to.x - anim.from.x) * v, y: anim.from.y + (anim.to.y - anim.from.y) * v };
-                const len = Math.hypot(anim.to.x - anim.from.x, anim.to.y - anim.from.y) || 1;
+                const at = alongPath(anim.path, anim.cum, v * anim.cum[anim.cum.length - 1]);
+                const prevHero = heroRef.current;
+                if (prevHero) stepAccRef.current += Math.hypot(at.p.x - prevHero.x, at.p.y - prevHero.y);
+                if (stepAccRef.current >= 30) {
+                    stepAccRef.current %= 30;
+                    mapSfx.play("step"); // passos proporcionais à distância, não ao tempo
+                }
+                heroRef.current = at.p;
                 const ahead = LOOK_AHEAD * Math.sin(Math.PI * e); // antecipação entra e sai suave
-                lead = { x: ((anim.to.x - anim.from.x) / len) * ahead, y: ((anim.to.y - anim.from.y) / len) * ahead };
+                lead = { x: at.dir.x * ahead, y: at.dir.y * ahead };
                 if (e >= 1) {
                     heroAnimRef.current = null;
                     heroRef.current = anim.to;
@@ -1346,9 +1401,16 @@ export function AdventureMap(props: Props) {
             chestsShownRef.current = expedition.marksCollected;
         } else if (heroRef.current.x !== to.x || heroRef.current.y !== to.y) {
             const from = heroRef.current;
-            const dist = Math.hypot(to.x - from.x, to.y - from.y);
-            const dur = reduceRef.current ? 0 : Math.max(220, Math.min(1500, (dist / HERO_SPEED) * 1000));
-            heroAnimRef.current = { from, to, t0: performance.now(), dur, onArrive: arrivalQueueRef.current };
+            // segue a rota calculada pelo terreno (se ela termina aqui); senão, reta
+            const planned = pendingPathRef.current;
+            pendingPathRef.current = null;
+            const last = planned?.[planned.length - 1];
+            const path = planned && last && Math.hypot(last.x - to.x, last.y - to.y) < 0.5 ? [from, ...planned.slice(1, -1), to] : [from, to];
+            const cum = [0];
+            for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y));
+            const dist = cum[cum.length - 1];
+            const dur = reduceRef.current ? 0 : Math.max(220, Math.min(1800, (dist / HERO_SPEED) * 1000));
+            heroAnimRef.current = { path, cum, to, t0: performance.now(), dur, onArrive: arrivalQueueRef.current };
             arrivalQueueRef.current = [];
             followRef.current = true;
             camGoalRef.current = null;
@@ -1385,6 +1447,7 @@ export function AdventureMap(props: Props) {
             if (!reduceRef.current) popRef.current.set(id, now);
             addFx("reveal", t.center.x, t.center.y + 4, t.radius, TIER.large.dur);
             addTrauma(TIER.large.trauma);
+            mapSfx.play("reveal");
             const cam = camRef.current;
             if (cam) camGoalRef.current = camCentered(t.center, Math.max(cam.zoom, 1.6));
         }
@@ -1434,16 +1497,49 @@ export function AdventureMap(props: Props) {
         a === b ||
         (!!a && !!b && a.kind === b.kind && ("placeId" in a ? a.placeId : a.markId) === ("placeId" in b ? b.placeId : b.markId));
 
+    // Toque com dois dedos = pinça (zoom); um gesto nunca vira "toque" que move o Cartógrafo.
+    const pinchMetrics = (rect: DOMRect) => {
+        const [a, b] = [...pointersRef.current.values()];
+        return {
+            dist: Math.hypot(a.x - b.x, a.y - b.y),
+            mid: { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top },
+        };
+    };
     const onPointerDown = (e: React.PointerEvent) => {
         const cam = camRef.current;
-        if (!cam) return;
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!cam || !rect) return;
         (e.target as Element).setPointerCapture?.(e.pointerId);
+        mapSfx.unlock();
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointersRef.current.size === 2) {
+            const { dist, mid } = pinchMetrics(rect);
+            pinchRef.current = { dist0: dist, zoom0: cam.zoom, anchor: toWorld(mid.x, mid.y) };
+            gestureRef.current = true;
+            drag.current = null;
+            followRef.current = false;
+            camGoalRef.current = null;
+            return;
+        }
+        if (pointersRef.current.size === 1) gestureRef.current = false;
         drag.current = { sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, moved: false };
+    };
+    const endPointer = (e: React.PointerEvent) => {
+        pointersRef.current.delete(e.pointerId);
+        if (pointersRef.current.size < 2) pinchRef.current = null;
     };
     const onPointerMove = (e: React.PointerEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         const cam = camRef.current;
         if (!rect || !cam) return;
+        if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinchRef.current && pointersRef.current.size >= 2) {
+            const { dist, mid } = pinchMetrics(rect);
+            camRef.current = clampCam(pinchCamera(pinchRef.current, dist, mid));
+            requestRender();
+            return;
+        }
+        if (gestureRef.current) return; // dedo restante de uma pinça: não arrasta nem pré-visualiza
         const d = drag.current;
         if (d) {
             const dx = e.clientX - d.sx;
@@ -1467,14 +1563,20 @@ export function AdventureMap(props: Props) {
         requestRender();
     };
     const onPointerUp = (e: React.PointerEvent) => {
+        endPointer(e);
         const d = drag.current;
         drag.current = null;
         const rect = canvasRef.current?.getBoundingClientRect();
+        if (gestureRef.current) {
+            if (pointersRef.current.size === 0) gestureRef.current = false;
+            return; // fim de pinça não é toque
+        }
         if (!d || d.moved || !rect) return;
         const pt = toWorld(e.clientX - rect.left, e.clientY - rect.top);
         const hit = hitTest(pt);
         const p = propsRef.current;
         if (hit?.kind === "town") {
+            mapSfx.play("select");
             p.onSelect(hit.placeId);
             return;
         }
@@ -1482,12 +1584,14 @@ export function AdventureMap(props: Props) {
         const queue: (() => void)[] = [];
         const res = p.onMove(pt);
         if (!res?.moved) return;
+        pendingPathRef.current = res.path;
         for (const y of res.collected) {
             const m = marks.find((x) => x.id === y.markId);
             if (m)
                 queue.push(() => {
                     addFx("gold", m.pos.x, m.pos.y, 0, TIER.medium.dur);
                     addTrauma(TIER.medium.trauma);
+                    mapSfx.play("chest");
                 });
         }
         if (!res.truncated && hit?.kind === "ruin") {
@@ -1548,32 +1652,27 @@ export function AdventureMap(props: Props) {
             followRef.current = false;
             requestRender();
         };
-        switch (e.key) {
-            case "ArrowLeft":
-            case "a":
+        // ações a partir da tecla FÍSICA (layout-independente); Ctrl/⌘/Alt ficam com o navegador
+        switch (actionForKey(e)) {
+            case "panLeft":
                 pan(-stepX, 0);
                 break;
-            case "ArrowRight":
-            case "d":
+            case "panRight":
                 pan(stepX, 0);
                 break;
-            case "ArrowUp":
-            case "w":
+            case "panUp":
                 pan(0, -stepY);
                 break;
-            case "ArrowDown":
-            case "s":
+            case "panDown":
                 pan(0, stepY);
                 break;
-            case "+":
-            case "=":
+            case "zoomIn":
                 zoomBy(1.25);
                 break;
-            case "-":
+            case "zoomOut":
                 zoomBy(1 / 1.25);
                 break;
-            case "c":
-            case "C":
+            case "centerHero":
                 if (heroRef.current) easeTo(heroRef.current);
                 break;
             default:
@@ -1611,6 +1710,11 @@ export function AdventureMap(props: Props) {
                         onPointerDown={onPointerDown}
                         onPointerMove={onPointerMove}
                         onPointerUp={onPointerUp}
+                        onPointerCancel={(e) => {
+                            endPointer(e);
+                            drag.current = null;
+                            if (pointersRef.current.size === 0) gestureRef.current = false;
+                        }}
                         onPointerLeave={() => {
                             pointerRef.current = null;
                             setHoverInfo(null);
@@ -1727,6 +1831,31 @@ export function AdventureMap(props: Props) {
                     </div>
                 </div>
                 <label className="flex items-center gap-2 text-xs text-[#d9c79a]">
+                    <span className="w-10 shrink-0">Som</span>
+                    <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={volume}
+                        onChange={(e) => {
+                            const v = Number(e.target.value);
+                            setVolume(v);
+                            mapSfx.setVolume(v);
+                            mapSfx.unlock(); // o próprio gesto libera o áudio
+                            try {
+                                window.localStorage.setItem("atlas:sound", String(v));
+                            } catch {
+                                /* storage indisponível */
+                            }
+                        }}
+                        className="h-1 flex-1 accent-[#c9a45c]"
+                        aria-label="Volume dos efeitos sonoros"
+                        aria-valuetext={volume === 0 ? "desligado" : `${Math.round(volume * 100)}%`}
+                    />
+                    <span className="w-14 text-right tabular-nums">{volume === 0 ? "desligado" : `${Math.round(volume * 100)}%`}</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-[#d9c79a]">
                     <input type="checkbox" checked={reduceMotion} onChange={toggleReduce} className="accent-[#c9a45c]" />
                     Reduzir movimento (sem tremor nem animações)
                 </label>
@@ -1735,7 +1864,7 @@ export function AdventureMap(props: Props) {
                     <li>🏛️ Ruína “?” = setor avistado, ainda sem nome</li>
                     <li>🚩 Bandeira vermelha = você habita · brilho dourado = lanternas</li>
                     <li>➤ Setas verdes = alcança hoje · vermelhas = além das léguas</li>
-                    <li>⌨️ Setas/WASD movem a visão · +/− zoom · C centraliza</li>
+                    <li>⌨️ Setas/WASD movem a visão · +/− zoom · C centraliza · 👆 pinça para zoom no toque</li>
                 </ul>
                 <div className="text-[11px] text-[#8a7a58]">
                     Biomas: {REALMS.map((r) => BIOME_STYLE[REALM_BIOME[r.id as CategoryId]].label).slice(0, 4).join(", ")}…

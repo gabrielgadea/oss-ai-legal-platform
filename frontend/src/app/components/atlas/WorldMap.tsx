@@ -9,7 +9,7 @@ import { scoresFor, TERRAIN_INFO } from "@/app/lib/atlas/scoring";
 import {
     FOG_CELL,
     generateMarks,
-    reachTowards,
+    planRoute,
     type Budget,
     type MoveResult,
 } from "@/app/lib/atlas/expedition";
@@ -249,8 +249,11 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
     const liftedCells = useMemo(() => new Set(expedition?.fog ?? []), [expedition?.fog]);
     const reach = useMemo(() => {
         if (!expeditionOn || !expedition || !leagues || !hover) return null;
-        return reachTowards(expedition.cartographer, hover, leagues.available, geo, discovered);
-    }, [expeditionOn, expedition, leagues, hover, geo, discovered]);
+        // mesma rota pelo terreno do mapa de Aventura (custos idênticos nos dois estilos)
+        const plan = planRoute(expedition, hover, leagues.available, geo);
+        const rest = plan.reach.truncated ? plan.points.slice(plan.reach.points.length - 1) : [];
+        return { ...plan.reach, total: plan.total, rest: [plan.reach.point, ...rest.slice(1)] };
+    }, [expeditionOn, expedition, leagues, hover, geo]);
 
     const handleMapClick = useCallback(
         (e: { clientX: number; clientY: number }) => {
@@ -637,13 +640,13 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
                         {/* Rota planejada até o cursor (vetor de deslocamento) */}
                         {reach && hover && (
                             <g className="pointer-events-none">
-                                <line x1={expedition.cartographer.x} y1={expedition.cartographer.y} x2={reach.point.x} y2={reach.point.y} stroke={NEON} strokeWidth={2.5} strokeLinecap="round" strokeDasharray="1 7" filter="url(#glow)" />
+                                <polyline points={reach.points.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={NEON} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" strokeDasharray="1 7" filter="url(#glow)" />
                                 {reach.truncated && (
-                                    <line x1={reach.point.x} y1={reach.point.y} x2={hover.x} y2={hover.y} stroke={NEON_WARN} strokeWidth={2} strokeLinecap="round" strokeDasharray="1 7" opacity={0.85} />
+                                    <polyline points={reach.rest.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={NEON_WARN} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" strokeDasharray="1 7" opacity={0.85} />
                                 )}
                                 <circle cx={reach.point.x} cy={reach.point.y} r={6} fill="none" stroke={reach.truncated ? NEON_WARN : NEON} strokeWidth={2} filter="url(#glow)" />
                                 <text x={reach.point.x + 11} y={reach.point.y - 8} style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, fontWeight: 700, fill: "#eaf2ff", paintOrder: "stroke", stroke: PARCHMENT, strokeWidth: 3.5 }}>
-                                    {Math.ceil(reach.cost)} léguas
+                                    {reach.truncated ? `${Math.floor(reach.cost)} de ${Math.ceil(reach.total)} léguas` : `${Math.ceil(reach.cost)} léguas`}
                                 </text>
                             </g>
                         )}

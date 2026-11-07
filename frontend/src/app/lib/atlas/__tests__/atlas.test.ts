@@ -432,7 +432,9 @@ test("expedição: mover dissipa bruma, gasta léguas e não ultrapassa o orçam
     const discovered = new Set<string>();
     const exp = initExpedition(world, discovered, []);
     const fog0 = exp.fog.length;
-    const far = { x: exp.cartographer.x + 5000, y: exp.cartographer.y }; // muito além do orçamento
+    // o destino é limitado ao mundo: usa o canto mais distante (rota cara, além do orçamento)
+    const corners = [{ x: 2, y: 2 }, { x: WORLD_W - 2, y: 2 }, { x: 2, y: WORLD_H - 2 }, { x: WORLD_W - 2, y: WORLD_H - 2 }];
+    const far = corners.reduce((best, c) => (Math.hypot(c.x - exp.cartographer.x, c.y - exp.cartographer.y) > Math.hypot(best.x - exp.cartographer.x, best.y - exp.cartographer.y) ? c : best));
     const res = resolveMove(exp, far, world, discovered, 0);
     assert.ok(res.moved && res.truncated);
     assert.ok(res.exp.fog.length > fog0, "a bruma foi dissipada no caminho");
@@ -561,4 +563,197 @@ test("procgen: smoothstep e aceitação de aglomerados ficam em 0..1", () => {
         }
     }
     assert.ok(hi - lo > 0.5, "vegetação deve formar bosques e clareiras, não uma camada uniforme");
+});
+
+// ── skill game-ai: rota do Cartógrafo pelo terreno ──────────────────────────
+import { planRoute, marksAlongPath } from "../expedition";
+import { navGrid, buildField, cellOf, cellCenterNav, COST, NAV_COLS, NAV_ROWS, NAV_CELL } from "../navigation";
+
+const ALL_FOG: string[] = [];
+for (let c = 0; c < 40; c++) for (let r = 0; r < 25; r++) ALL_FOG.push(`${c},${r}`);
+
+function seaFraction(points: { x: number; y: number }[], kind: Uint8Array): number {
+    let sea = 0, n = 0;
+    for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const L = Math.hypot(b.x - a.x, b.y - a.y);
+        for (let s = 0; s < L; s += 3) {
+            n++;
+            if (kind[cellOf({ x: a.x + ((b.x - a.x) * s) / L, y: a.y + ((b.y - a.y) * s) / L })] === 0) sea++;
+        }
+    }
+    return n ? sea / n : 0;
+}
+
+test("rota: campo de Dijkstra respeita a desigualdade de caminho mínimo em toda aresta", () => {
+    const world = generateWorld();
+    const grid = navGrid(world);
+    const field = buildField(grid, { x: 400, y: 300 }, () => true);
+    assert.equal(field.dist[field.start], 0);
+    let finite = 0;
+    for (let i = 0; i < NAV_COLS * NAV_ROWS; i++) {
+        if (Number.isFinite(field.dist[i])) finite++;
+        const cx = i % NAV_COLS, cy = Math.floor(i / NAV_COLS);
+        if (cx + 1 < NAV_COLS) {
+            const j = i + 1;
+            const m = (field.mult[i] + field.mult[j]) / 2;
+            assert.ok(field.dist[j] <= field.dist[i] + NAV_CELL * m + 1e-6, `aresta ${i}->${j}`);
+        }
+        if (cy + 1 < NAV_ROWS) {
+            const j = i + NAV_COLS;
+            const m = (field.mult[i] + field.mult[j]) / 2;
+            assert.ok(field.dist[j] <= field.dist[i] + NAV_CELL * m + 1e-6, `aresta ${i}->${j}`);
+        }
+    }
+    assert.equal(finite, NAV_COLS * NAV_ROWS, "o mar é atravessável: todo o mundo é alcançável");
+});
+
+test("rota: dentro da ilha não atravessa o mar; estrada revelada barateia; entre ilhas o mar pesa", () => {
+    const world = generateWorld();
+    const grid = navGrid(world);
+    const a = world.territories[0];
+    const b = world.territories.find((t) => t.realm === a.realm && t !== a)!;
+    const exp = { ...initExpedition(world, new Set(), []), cartographer: a.center };
+    const hidden = planRoute(exp, b.center, 999, world);
+    assert.equal(seaFraction(hidden.points, grid.kind), 0);
+    assert.deepEqual(hidden.points[0], a.center);
+    assert.deepEqual(hidden.points[hidden.points.length - 1], b.center);
+    const revealed = planRoute({ ...exp, fog: ALL_FOG }, b.center, 999, world);
+    assert.ok(revealed.total < hidden.total, `estrada vista deveria baratear: ${revealed.total} vs ${hidden.total}`);
+    assert.ok(revealed.total >= leagueCost(a.center, b.center, world, new Set()) * COST.road - 1e-6, "nunca abaixo do piso da estrada");
+    const other = world.territories.find((t) => t.realm !== a.realm)!;
+    const cross = planRoute(exp, other.center, 999, world);
+    assert.ok(cross.total > leagueCost(a.center, other.center, world, new Set()), "travessia custa mais que a linha reta");
+});
+
+test("rota: trunca no orçamento sobre o próprio caminho e é determinística", () => {
+    const world = generateWorld();
+    const exp = initExpedition(world, new Set(), []);
+    const goal = { x: 1500, y: 900 };
+    const plan = planRoute(exp, goal, 12, world);
+    assert.ok(plan.reach.truncated);
+    assert.ok(Math.abs(plan.reach.cost - 12) < 1e-6);
+    assert.deepEqual(plan.reach.points[plan.reach.points.length - 1], plan.reach.point);
+    assert.ok(plan.costs.every((c, i) => i === 0 || c >= plan.costs[i - 1]), "custo acumulado é monotônico");
+    const again = planRoute({ ...exp, fog: [...exp.fog] }, goal, 12, generateWorld());
+    assert.deepEqual(again.points, plan.points);
+    assert.ok(Math.abs(again.total - plan.total) < 1e-9);
+});
+
+test("rota: mover segue o caminho e coleta marcos tocados no trajeto", () => {
+    const world = generateWorld();
+    const mark = generateMarks()[0];
+    const start = { x: mark.pos.x - 70, y: mark.pos.y };
+    const exp = { ...initExpedition(world, new Set(), []), cartographer: start };
+    const res = resolveMove(exp, { x: mark.pos.x + 70, y: mark.pos.y }, world, new Set(), 0);
+    assert.ok(res.moved);
+    assert.deepEqual(res.path[0], start);
+    assert.deepEqual(res.path[res.path.length - 1], res.exp.cartographer);
+    assert.ok(res.exp.marksCollected.includes(mark.id), "o marco no meio do caminho foi coletado");
+    assert.ok(marksAlongPath([start], [], [mark]).length === 0, "longe do marco, nada é coletado");
+    assert.ok(cellCenterNav(cellOf(start)).x > 0);
+});
+
+// ── skill input-systems: ações por tecla física e pinça ─────────────────────
+import { actionForKey, pinchCamera } from "../input";
+
+test("entrada: ações vêm da tecla FÍSICA (AZERTY mantém WASD) e Ctrl/⌘ ficam com o navegador", () => {
+    // AZERTY: a tecla física KeyW produz "z", KeyA produz "q" — a ação segue a posição
+    assert.equal(actionForKey({ code: "KeyW", key: "z" }), "panUp");
+    assert.equal(actionForKey({ code: "KeyA", key: "q" }), "panLeft");
+    assert.equal(actionForKey({ code: "ArrowDown", key: "ArrowDown" }), "panDown");
+    assert.equal(actionForKey({ code: "NumpadAdd", key: "+" }), "zoomIn");
+    // "+" em outra tecla física (layouts diversos) ainda aproxima
+    assert.equal(actionForKey({ code: "BracketRight", key: "+" }), "zoomIn");
+    assert.equal(actionForKey({ code: "KeyC", key: "c" }), "centerHero");
+    // Ctrl/⌘ + "+" é o zoom da página: não sequestra
+    assert.equal(actionForKey({ code: "Equal", key: "+", ctrlKey: true }), null);
+    assert.equal(actionForKey({ code: "KeyW", key: "w", metaKey: true }), null);
+    assert.equal(actionForKey({ code: "KeyX", key: "x" }), null);
+});
+
+test("entrada: pinça escala pela razão dos dedos e mantém a âncora sob o ponto médio", () => {
+    const start = { dist0: 100, zoom0: 1.5, anchor: { x: 800, y: 500 } };
+    const mid = { x: 200, y: 150 };
+    const cam = pinchCamera(start, 200, mid);
+    assert.equal(cam.zoom, 3);
+    // o ponto do mundo sob o meio dos dedos continua sendo a âncora
+    assert.ok(Math.abs(cam.x + mid.x / cam.zoom - start.anchor.x) < 1e-9);
+    assert.ok(Math.abs(cam.y + mid.y / cam.zoom - start.anchor.y) < 1e-9);
+    assert.equal(pinchCamera({ ...start, dist0: 0 }, 50, mid).zoom, 75, "distância inicial nula não divide por zero");
+});
+
+// ── skill save-systems: versão, migração, validação, backup e quarentena ────
+import { migrateState, readState, writeState, resetBackupClock, STORAGE_KEY, BACKUP_KEY, QUARANTINE_KEY } from "../state";
+
+function memStorage(init: Record<string, string> = {}) {
+    const m = new Map(Object.entries(init));
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), map: m };
+}
+
+test("save: migra em ordem, aceita save sem versão e recusa save de versão mais nova", () => {
+    const steps = { 1: (d: Record<string, unknown>) => ({ ...d, extra: "v2" }), 2: (d: Record<string, unknown>) => ({ ...d, outra: true }) };
+    const out = migrateState({ version: 1, records: {} }, steps, 3)!;
+    assert.equal(out.version, 3);
+    assert.equal(out.extra, "v2");
+    assert.equal(out.outra, true);
+    assert.equal(migrateState({ records: {} })!.version, 1, "sem campo = primeiro formato");
+    assert.equal(migrateState({ version: 2, records: {} }), null, "versão mais nova: recusa");
+    assert.equal(migrateState({ version: 1, records: {} }, {}, 2), null, "migração faltando: recusa");
+});
+
+test("save: expedição corrompida é descartada sem derrubar o restante", () => {
+    const s = sanitizeState({ ...emptyState(), explored: "x", caravan: [1, 2], expedition: { cartographer: { x: "a" }, fog: 3 } })!;
+    assert.ok(s);
+    assert.equal(s.expedition, undefined);
+    assert.deepEqual(s.explored, {});
+    assert.deepEqual(s.caravan, []);
+    const ok = sanitizeState({ ...emptyState(), expedition: initExpedition(generateWorld(), new Set(), []) })!;
+    assert.ok(ok.expedition && Array.isArray(ok.expedition.fog));
+});
+
+test("save: cópia de segurança restaura e o ilegível vai para a quarentena antes de ser sobrescrito", () => {
+    resetBackupClock();
+    const st = memStorage();
+    const s1 = { ...emptyState(), explored: { wikipedia: "2026-11-07" } };
+    assert.ok(writeState(st, s1, 1_000));
+    assert.ok(st.map.has(BACKUP_KEY), "primeiro save cria a cópia");
+    // dentro de 5 min, a cópia não é reescrita
+    writeState(st, { ...s1, explored: {} }, 2_000);
+    assert.deepEqual(JSON.parse(st.map.get(BACKUP_KEY)!).explored, { wikipedia: "2026-11-07" });
+    // principal corrompido: lê da cópia e preserva o corrompido
+    st.map.set(STORAGE_KEY, "{corrompido");
+    const r = readState(st);
+    assert.equal(r.source, "backup");
+    assert.deepEqual(r.state!.explored, { wikipedia: "2026-11-07" });
+    assert.equal(st.map.get(QUARANTINE_KEY), "{corrompido");
+    // save de versão futura também vai para a quarentena (não é rebaixado em silêncio)
+    const st2 = memStorage({ [STORAGE_KEY]: JSON.stringify({ version: 9, records: {} }) });
+    assert.equal(readState(st2).state, null);
+    assert.ok(st2.map.get(QUARANTINE_KEY)!.includes('"version":9'));
+    // storage recusando gravação não lança
+    assert.equal(writeState({ getItem: () => null, setItem: () => { throw new Error("cota"); } }, s1), false);
+});
+
+// ── skill audio-design: curva de volume e variação ──────────────────────────
+import { sliderToGain, gainToDb, vary, mapSfx } from "../sfx";
+
+test("áudio: slider vira ganho quadrático (0 = silêncio real) e variação fica em ±1 semitom/±2 dB", () => {
+    assert.equal(sliderToGain(0), 0);
+    assert.equal(sliderToGain(1), 1);
+    assert.equal(sliderToGain(0.5), 0.25);
+    assert.equal(sliderToGain(7), 1);
+    assert.equal(sliderToGain(Number.NaN), 0);
+    assert.ok(Math.abs(gainToDb(0.5) - -6.0206) < 1e-3);
+    assert.equal(gainToDb(0), -Infinity);
+    const r = seededRandom(3);
+    for (let i = 0; i < 500; i++) {
+        const v = vary(r);
+        assert.ok(v.rate >= Math.pow(2, -1 / 12) - 1e-12 && v.rate <= Math.pow(2, 1 / 12) + 1e-12);
+        assert.ok(v.gain >= Math.pow(10, -2 / 20) - 1e-12 && v.gain <= Math.pow(10, 2 / 20) + 1e-12);
+    }
+    // sem gesto/contexto (ex.: servidor ou testes), tocar é no-op seguro
+    mapSfx.setVolume(1);
+    mapSfx.play("reveal");
+    mapSfx.setVolume(0);
 });

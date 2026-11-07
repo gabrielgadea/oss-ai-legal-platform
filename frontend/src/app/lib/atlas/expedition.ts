@@ -17,6 +17,7 @@
 
 import { PLACE_BY_ID } from "./catalog";
 import { seededRandom } from "./multiverse";
+import { buildField, cellCenterNav, cellOf, navGrid, pathTo, planFromPath, type NavField, type RoutePlan } from "./navigation";
 import { scoresFor } from "./scoring";
 import type { ExpeditionState } from "./types";
 import { REALMS, WORLD_H, WORLD_W, epithet, type Pt, type WorldGeometry } from "./world";
@@ -150,7 +151,7 @@ function onRoad(from: Pt, to: Pt, world: WorldGeometry, discovered: Set<string>)
     return nearKnownTerritory(from, world, discovered) && nearKnownTerritory(to, world, discovered);
 }
 
-/** Custo em léguas para ir de `from` a `to`. */
+/** Estimativa em LINHA RETA (legado; o movimento real usa `planRoute`). */
 export function leagueCost(from: Pt, to: Pt, world: WorldGeometry, discovered: Set<string>): number {
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
     const base = dist / LEAGUE_PX;
@@ -181,6 +182,70 @@ export function reachTowards(
     const frac = available / full;
     const point = { x: from.x + (to.x - from.x) * frac, y: from.y + (to.y - from.y) * frac };
     return { point, cost: available, truncated: true };
+}
+
+// ── Rota pelo terreno (skill game-ai: campo de Dijkstra + caminho de volta) ──
+
+export type { RoutePlan } from "./navigation";
+
+let fieldCache: { world: WorldGeometry; start: number; fog: string[]; field: NavField } | null = null;
+let routeCache: { field: NavField; from: Pt; goalCell: number; available: number; plan: RoutePlan } | null = null;
+
+/** Campo de custos a partir do Cartógrafo; refeito só quando a origem ou a bruma mudam. */
+export function navFieldFor(world: WorldGeometry, from: Pt, fog: string[]): NavField {
+    const start = cellOf(from);
+    if (fieldCache && fieldCache.world === world && fieldCache.start === start && fieldCache.fog === fog) return fieldCache.field;
+    const grid = navGrid(world);
+    const lifted = new Set(fog);
+    // estrada só dá desconto onde a bruma já foi dissipada
+    const roadOpen = (i: number) => {
+        const c = cellCenterNav(i);
+        return lifted.has(fogKey(Math.floor(c.x / FOG_CELL), Math.floor(c.y / FOG_CELL)));
+    };
+    const field = buildField(grid, from, roadOpen);
+    fieldCache = { world, start, fog, field };
+    return field;
+}
+
+/**
+ * Planeja a rota do Cartógrafo até `to` contornando o terreno: estradas já
+ * vistas custam metade, mar custa o dobro, labirinto custa 30% a mais. Devolve
+ * o caminho completo e até onde o orçamento alcança.
+ */
+export function planRoute(exp: ExpeditionState, to: Pt, available: number, world: WorldGeometry): RoutePlan {
+    const from = exp.cartographer;
+    const field = navFieldFor(world, from, exp.fog);
+    const goalCell = cellOf(to);
+    const r = routeCache;
+    if (r && r.field === field && r.from === from && r.goalCell === goalCell && r.available === available) return r.plan;
+    const points = pathTo(field, from, to) ?? [from, to];
+    const plan = planFromPath(points, field.mult, LEAGUE_PX, available);
+    routeCache = { field, from, goalCell, available, plan };
+    return plan;
+}
+
+/** Dissipa a bruma ao longo de uma polilinha. */
+export function liftFogAlongPath(points: Pt[], fog: string[]): string[] {
+    let out = fog;
+    for (let i = 1; i < points.length; i++) out = liftFogAlong(points[i - 1], points[i], out);
+    return out;
+}
+
+/** Marcos tocados em qualquer ponto do caminho (como pegar um tesouro ao passar por cima). */
+export function marksAlongPath(points: Pt[], collected: string[], marks = generateMarks()): Mark[] {
+    const done = new Set(collected);
+    const hit: Mark[] = [];
+    for (const m of marks) {
+        if (done.has(m.id)) continue;
+        for (let i = 1; i < points.length && !hit.includes(m); i++) {
+            const a = points[i - 1], b = points[i];
+            const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+            const t = len2 ? Math.max(0, Math.min(1, ((m.pos.x - a.x) * (b.x - a.x) + (m.pos.y - a.y) * (b.y - a.y)) / len2)) : 0;
+            if (Math.hypot(a.x + (b.x - a.x) * t - m.pos.x, a.y + (b.y - a.y) * t - m.pos.y) <= COLLECT_RADIUS) hit.push(m);
+        }
+        if (points.length === 1 && Math.hypot(points[0].x - m.pos.x, points[0].y - m.pos.y) <= COLLECT_RADIUS) hit.push(m);
+    }
+    return hit;
 }
 
 /** Dissipa a bruma ao longo do segmento from→to e devolve a lista de células final. */
@@ -273,6 +338,8 @@ export interface MoveResult {
     truncated: boolean;
     cost: number;
     collected: MarkYield[];
+    /** Caminho percorrido (para a animação seguir o terreno). */
+    path: Pt[];
 }
 
 /** Zera gasto e bônus quando o dia virou. */
@@ -296,16 +363,16 @@ export function resolveMove(
 ): MoveResult {
     const e = freshDay(exp, now);
     const avail = budget(e, inhabitedCount, now).available;
-    const reach = reachTowards(e.cartographer, dest, avail, world, discovered);
+    const { reach } = planRoute(e, dest, avail, world);
     if (reach.cost < 0.05) {
-        return { exp: e, moved: false, truncated: reach.truncated, cost: 0, collected: [] };
+        return { exp: e, moved: false, truncated: reach.truncated, cost: 0, collected: [], path: [e.cartographer] };
     }
-    const fog = liftFogAlong(e.cartographer, reach.point, e.fog);
+    const fog = liftFogAlongPath(reach.points, e.fog);
     const marksCollected = [...e.marksCollected];
     const rumorsFound = [...e.rumorsFound];
     let bonus = e.leaguesBonus;
     const collected: MarkYield[] = [];
-    for (const m of marksInReach(reach.point, marksCollected)) {
+    for (const m of marksAlongPath(reach.points, marksCollected)) {
         const y = collectMarkYield(m, world, discovered);
         marksCollected.push(m.id);
         if (y.rumorPlaceId && !rumorsFound.includes(y.rumorPlaceId)) rumorsFound.push(y.rumorPlaceId);
@@ -326,6 +393,7 @@ export function resolveMove(
         truncated: reach.truncated,
         cost: reach.cost,
         collected,
+        path: reach.points,
     };
 }
 

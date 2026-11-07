@@ -98,7 +98,34 @@ Medidor opcional: `localStorage.setItem("atlas:perf", "1")` expõe em
 `window.__atlasBuild` o custo de cada reconstrução da cena.
 
 Lacunas: o repositório de skills não tem skill de gênero estratégia/4X.
-Pathfinding real (A* sobre o terreno) e áudio ficaram fora do escopo.
+Pathfinding e áudio entraram na segunda rodada (§0.0.2).
+
+### 0.0.2 Segunda rodada: `game-ai`, `input-systems`, `save-systems`, `audio-design`
+
+| Skill | Lacuna encontrada | O que mudou | Onde |
+|---|---|---|---|
+| `game-ai` | O Cartógrafo andava em **linha reta**, atravessando mar e costa como se fossem terra. | **Rota pelo terreno.** Grade de 10 px com custo por célula: estrada já vista ×0,5, terra ×1, labirinto ×1,3, mar ×2. A estrada sob a bruma custa como terra comum, para a rota não vazar o inexplorado. Como há **uma origem e muitos destinos**, um único **campo de Dijkstra** (o *flow field* da skill) é refeito só quando o Cartógrafo anda ou a bruma muda; cada posição do mouse apenas refaz o caminho de volta. Sem heurística, não há risco de A* inadmissível com pesos < 1. O caminho é alisado por linha de visada de custo uniforme. A pré-visualização (setas verdes/vermelhas e "X de Y léguas"), o custo real, a bruma dissipada e a coleta de marcos (agora **em qualquer ponto do trajeto**) usam a mesma rota nos dois estilos de mapa. O cavaleiro percorre a polilinha. | `lib/atlas/navigation.ts`, `planRoute` em `expedition.ts`, `AdventureMap.tsx`, `WorldMap.tsx` |
+| `input-systems` | WASD lia `e.key` (troca de lugar em AZERTY), "+" brigava com o Ctrl+"+" do navegador, e não havia zoom por toque. | O jogo lê **ações**, não teclas: mapa da **tecla física** (`e.code`) para a ação, com "+"/"−" por caractere como alternativa. Combinações com Ctrl/⌘/Alt ficam com o navegador. **Pinça** com dois dedos dá zoom ancorado no ponto médio e nunca vira toque que move o Cartógrafo; `pointercancel` é tratado. | `lib/atlas/input.ts`, `AdventureMap.tsx` |
+| `save-systems` | Um save ilegível fazia o app começar vazio e **sobrescrever** o progresso. Não havia caminho de migração. Uma expedição corrompida derrubava o mapa. | Pipeline de **migração** (`versão → versão+1`): sem versão vale 1, e versão mais nova é **recusada**, não rebaixada. **Validação campo a campo**: expedição inválida é descartada e recriada. **Cópia de segurança** renovada no máximo a cada 5 min, com fallback na leitura. **Quarentena**: o ilegível ou mais novo é preservado antes de qualquer gravação. "Apagar dados" remove **todas** as cópias (LGPD). `localStorage.setItem` já é atômico por chave, então não precisa de temp + rename. | `lib/atlas/state.ts` |
+| `audio-design` | Sem som. | **SFX sintetizados** em WebAudio, sem arquivos (nada a licenciar ou baixar). Barramentos: som → SFX (headroom) → master (volume) → limitador de segurança. O slider vira **ganho s²** (curva perceptual). Variação de ±1 semitom e ±2 dB por disparo. Teto de 12 vozes. Níveis espelhando o game feel: passos por **distância** percorrida, carrilhão no baú, acorde na revelação, clique na seleção. **Desligado por padrão**; o contexto só nasce num gesto do usuário. | `lib/atlas/sfx.ts`, `AdventureMap.tsx` |
+
+**Medições** (mesmo harness da §0.0.1, build de produção, mediana de 3):
+
+| Medida | Resultado |
+|---|---|
+| Campo de Dijkstra (16.000 células), aquecido | mediana 8 ms, máx. 12 ms, uma vez por movimento |
+| 300 consultas de rota sob o mouse (Node) | 2 ms no total (cache + caminho de volta) |
+| Custo por movimento do mouse no navegador | 2,6–2,9 ms (era 2,7 ms sem rota); JS +0,07 ms/evento |
+| Tarefas longas (> 50 ms) | 0 |
+
+Bug encontrado na medição: com `Float32Array` para as distâncias, o
+arredondamento fazia nós serem reinseridos no heap sem parar (6,1 s para
+montar o campo). Com `Float64Array`, caiu para 18 ms a frio. Um teste agora
+verifica a desigualdade do caminho mínimo em toda aresta do campo.
+
+Mudança de balanceamento a observar: o mar custa o dobro, então viajar entre
+ilhas ficou mais caro do que na linha reta antiga. Dentro de uma ilha, com
+estradas já vistas, a viagem ficou mais barata.
 
 ## 0. Estética: cosmos neural de dados
 
