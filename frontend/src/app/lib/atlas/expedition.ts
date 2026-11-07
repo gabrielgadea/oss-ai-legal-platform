@@ -71,7 +71,8 @@ function liftAround(point: Pt, radius: number, into: Set<string>): void {
 export function startPosition(world: WorldGeometry, inhabited: string[]): Pt {
     for (const id of inhabited) {
         const t = world.territories.find((x) => x.placeId === id);
-        if (t) return { x: t.center.x, y: t.center.y };
+        // na borda da praça, à frente do castelo (não em cima dele)
+        if (t) return { x: t.center.x, y: t.center.y + t.radius * 0.8 };
     }
     return { x: WORLD_W / 2, y: WORLD_H / 2 };
 }

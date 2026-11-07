@@ -11,6 +11,37 @@ toma decisões de rota que o mapa simula na hora.
 
 Rota no app: `/atlas` (item **Atlas Digital** na barra lateral).
 
+## 0. Estilos do mapa: Aventura (padrão) e Cosmos
+
+A aba **Mundo** oferece dois estilos, alternáveis no canto do mapa (a escolha
+fica salva no navegador):
+
+**Aventura (padrão)** — `AdventureMap.tsx` + `lib/atlas/adventure.ts`. Segue a
+linguagem dos mapas de estratégia de fantasia por turnos (as referências de
+Heroes of Might & Magic enviadas), com arte **procedural e original** — nenhum
+asset, nome ou interface de jogo existente foi copiado:
+
+- Terreno pintado em canvas: mar com ondas, águas rasas, praias e ilhas com
+  textura. Cada reino tem um **bioma** que expressa sua essência: campina
+  (social), floresta de outono (vídeo), costa de palmeiras (mensagens), tundra
+  de altas montanhas (conhecimento), colinas (áudio), deserto de bazares
+  (comércio), planalto pedregoso (cidadania), selva (jogos e criação).
+- Decorações procedurais (árvores, pinheiros nevados, palmeiras, cordilheiras,
+  colinas, rochas, cactos, dunas, flores, cogumelos) e **estradas de terra**
+  ligando as cidades de cada reino (árvore geradora mínima).
+- **Castelos** para territórios revelados (tamanho = volume de conteúdo; casas
+  em volta = população; bandeira vermelha = você habita; brilho dourado =
+  lanternas), **ruínas "?"** para setores avistados mas sem nome, **baús** para
+  os marcos e um **cavaleiro** com estandarte para o Cartógrafo.
+- **Névoa preta estrelada** sobre o que não foi explorado (a exploração está
+  sempre ativa neste estilo), **setas verdes/vermelhas** mostrando até onde as
+  léguas de hoje alcançam, **minimapa** clicável e **painel lateral** com
+  léguas, domínios, setores por revelar e baús restantes.
+- Clicar num castelo abre o domínio; clicar no mapa move o Cartógrafo; chegar a
+  uma ruína dispara a expedição real.
+
+**Cosmos** — o estilo futurista anterior (descrito abaixo), mantido como opção.
+
 ## 0. Estética: cosmos neural de dados
 
 O mapa não usa a linguagem de pergaminho medieval, e sim a de um **cosmos

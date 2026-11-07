@@ -469,3 +469,49 @@ test("expedição: ações reais creditam léguas; sem modo é no-op", () => {
     s = grantLeagues(s, BONUS_IMPORT);
     assert.equal(s.expedition!.leaguesBonus, before + BONUS_IMPORT);
 });
+
+// ── Mapa de aventura (terreno procedural) ───────────────────────────────────
+import { generateAdventure, generateRoads, pointInPolygon, quadPoint, REALM_BIOME, BIOME_STYLE } from "../adventure";
+import { islandPolygon } from "../world";
+
+test("aventura: biomas definidos e terreno determinístico", () => {
+    for (const r of REALMS) assert.ok(BIOME_STYLE[REALM_BIOME[r.id]], r.id);
+    const a = generateAdventure();
+    const b = generateAdventure();
+    assert.equal(a, b); // memoizado
+    const roads2 = generateRoads(generateWorld());
+    assert.deepEqual(roads2, a.roads);
+    assert.ok(a.decorations.length > 400, `decorações: ${a.decorations.length}`);
+});
+
+test("aventura: decorações dentro da ilha, fora das clareiras das cidades", () => {
+    const { world, decorations } = generateAdventure();
+    for (const d of decorations) {
+        const realm = REALMS.find((r) => r.id === d.realm)!;
+        assert.ok(pointInPolygon({ x: d.x, y: d.y }, islandPolygon(realm)), `${d.kind} fora da ilha`);
+        for (const t of world.territories) {
+            assert.ok(Math.hypot(t.center.x - d.x, t.center.y - d.y) > t.radius, `${d.kind} sobre ${t.placeId}`);
+        }
+    }
+    // ordenadas por y (pintura com profundidade)
+    for (let i = 1; i < decorations.length; i++) assert.ok(decorations[i].y >= decorations[i - 1].y);
+});
+
+test("aventura: estradas ligam todas as cidades de cada reino (árvore)", () => {
+    const { world, roads } = generateAdventure();
+    for (const r of REALMS) {
+        const towns = world.territories.filter((t) => t.realm === r.id);
+        const rs = roads.filter((x) => x.realm === r.id);
+        assert.equal(rs.length, towns.length - 1, r.id);
+        // união-busca: tudo conectado
+        const parent = new Map(towns.map((t) => [`${t.center.x},${t.center.y}`, `${t.center.x},${t.center.y}`]));
+        const find = (k: string): string => (parent.get(k) === k ? k : find(parent.get(k)!));
+        for (const e of rs) parent.set(find(`${e.from.x},${e.from.y}`), find(`${e.to.x},${e.to.y}`));
+        assert.equal(new Set(towns.map((t) => find(`${t.center.x},${t.center.y}`))).size, 1, r.id);
+    }
+    const r0 = roads[0];
+    assert.deepEqual(quadPoint(r0, 0), r0.from);
+    assert.deepEqual(quadPoint(r0, 1), r0.to);
+    assert.ok(pointInPolygon({ x: 1, y: 1 }, [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]));
+    assert.ok(!pointInPolygon({ x: 9, y: 1 }, [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]));
+});

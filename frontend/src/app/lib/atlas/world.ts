@@ -215,6 +215,11 @@ function territoryRadius(p: Place): number {
  * Gera o mundo inteiro. Posições dependem só do catálogo e da semente —
  * nunca do uso individual — para que todos vejam o mesmo multiverso.
  */
+/** Polígono da costa de um reino (os mesmos pontos usados em `generateWorld`). */
+export function islandPolygon(realm: Realm): Pt[] {
+    return blobPoints(realm.center, realm.radius, hash(realm.id), 0.13, 72);
+}
+
 export function generateWorld(): WorldGeometry {
     const islands: WorldGeometry["islands"] = [];
     const territories: Territory[] = [];

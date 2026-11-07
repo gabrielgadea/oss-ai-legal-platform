@@ -7,6 +7,7 @@ import { PLACE_BY_ID } from "@/app/lib/atlas/catalog";
 import { formatMinutes } from "@/app/lib/atlas/metrics";
 import { REALMS, randomExpedition } from "@/app/lib/atlas/world";
 import { AchievementsPanel } from "./AchievementsPanel";
+import { AdventureMap } from "./AdventureMap";
 import { AnalyticsPanel } from "./AnalyticsPanel";
 import { BrazilPanel } from "./BrazilPanel";
 import { ConnectorsPanel } from "./ConnectorsPanel";
@@ -39,6 +40,28 @@ export function AtlasView() {
     const [expedition, setExpedition] = useState<string | null>(null);
     const [echo, setEcho] = useState<string | null>(null);
     const [expMode, setExpMode] = useState(false);
+    // Estilo do mapa: "Aventura" (padrão, mapa de estratégia de fantasia) ou "Cosmos".
+    const [mapStyle, setMapStyle] = useState<"adventure" | "cosmos">(() => {
+        try {
+            return window.localStorage.getItem("atlas:mapStyle") === "cosmos" ? "cosmos" : "adventure";
+        } catch {
+            return "adventure";
+        }
+    });
+    const chooseStyle = (s: "adventure" | "cosmos") => {
+        setMapStyle(s);
+        try {
+            window.localStorage.setItem("atlas:mapStyle", s);
+        } catch {
+            /* storage indisponível */
+        }
+        track("tab_viewed", { tab: `map_${s}` });
+    };
+    const { enterExpedition } = actions;
+    // No estilo Aventura a exploração é sempre ativa (névoa + Cartógrafo).
+    useEffect(() => {
+        if (mapStyle === "adventure" && atlas.loaded && !expState) enterExpedition();
+    }, [mapStyle, atlas.loaded, expState, enterExpedition]);
 
     const toggleExpMode = () => {
         setExpMode((on) => {
@@ -137,6 +160,40 @@ export function AtlasView() {
                                     <StatTile label="Diversidade" value={usage.length ? String(metrics.diversity) : "—"} hint="Equilíbrio entre reinos" />
                                 </div>
                             </div>
+                            <div className="flex items-center justify-end gap-2 text-xs">
+                                <span className="text-gray-500">Estilo do mapa:</span>
+                                <div className="flex rounded-lg border border-gray-300 p-0.5 font-medium">
+                                    <button onClick={() => chooseStyle("adventure")} className={`rounded-md px-2.5 py-1 ${mapStyle === "adventure" ? "bg-[#6b5232] text-[#fff3d0]" : "text-gray-700"}`}>
+                                        Aventura
+                                    </button>
+                                    <button onClick={() => chooseStyle("cosmos")} className={`rounded-md px-2.5 py-1 ${mapStyle === "cosmos" ? "bg-[#0a1430] text-[#5fe3ff]" : "text-gray-700"}`}>
+                                        Cosmos
+                                    </button>
+                                </div>
+                            </div>
+                            {mapStyle === "adventure" ? (
+                                <>
+                                    <AdventureMap
+                                        state={state}
+                                        usage={usage}
+                                        discovered={discovered}
+                                        world={world}
+                                        rumors={rumors}
+                                        justRevealed={atlas.justRevealed}
+                                        selected={selected}
+                                        expedition={expState}
+                                        leagues={leagues}
+                                        onSelect={setSelected}
+                                        onExpedition={startExpedition}
+                                        onMove={actions.moveCartographer}
+                                    />
+                                    <p className="text-xs text-gray-500">
+                                        Clique no mapa para mover o Cartógrafo (custa léguas; labirintos custam mais, estradas entre domínios menos).
+                                        Chegar a uma ruína a revela; clicar num castelo abre o domínio. Arraste para navegar, roda do mouse para aproximar.
+                                    </p>
+                                </>
+                            ) : (
+                            <>
                             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1b2742] bg-[#070d1c] px-4 py-2.5">
                                 <button
                                     onClick={toggleExpMode}
@@ -180,6 +237,8 @@ export function AtlasView() {
                                     ? "Clique no mapa para mover o Cartógrafo e dissipar a Bruma (custa léguas; labirinto custa mais, trilhas menos). Marcos dão rumores; chegar a um território o revela."
                                     : "Arraste para navegar, use a roda do mouse ou os botões para aproximar. Clique numa terra hachurada para partir em expedição."}
                             </p>
+                            </>
+                            )}
                         </div>
                     )}
                     {tab === "journal" && (
