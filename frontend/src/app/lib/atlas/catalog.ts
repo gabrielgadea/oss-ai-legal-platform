@@ -781,6 +781,66 @@ export const PLACES: Place[] = [
     },
 ];
 
+// ---------------------------------------------------------------------------
+// Volume de conteúdo (ordem de grandeza) — só onde diverge nitidamente da
+// população. Sem override, a UI estima a partir da população e marca como tal.
+// ---------------------------------------------------------------------------
+const CONTENT_VOLUME: Record<string, 1 | 2 | 3 | 4 | 5> = {
+    "google-search": 5, // indexa a web inteira
+    youtube: 5,
+    wikipedia: 5, // poucos editores, conteúdo imenso
+    "google-maps": 5,
+    openstreetmap: 4,
+    reddit: 5,
+    pinterest: 4,
+    tiktok: 5,
+    instagram: 5,
+    x: 4,
+    steam: 4,
+    roblox: 5,
+    "itch-io": 3,
+    spotify: 4,
+    "youtube-music": 4,
+    netflix: 3, // catálogo grande, mas finito
+    globoplay: 2,
+    coursera: 3,
+    "khan-academy": 3,
+    substack: 4,
+    mastodon: 3,
+    bluesky: 3,
+    // mensageiros: muita gente, pouco conteúdo público
+    whatsapp: 1,
+    telegram: 3,
+    signal: 1,
+    messenger: 1,
+    discord: 3,
+    gmail: 1,
+    protonmail: 1,
+    element: 1,
+    // cidadania: bases pequenas, porém densas
+    govbr: 2,
+    "meu-sus-digital": 1,
+    "portal-transparencia": 3,
+};
+
+// Deep links públicos e estáveis para um CONTEÚDO (não a home). Curadoria
+// conservadora: só onde tenho confiança de que a URL existe e é pública.
+const ENTRY_CONTENT: Record<string, { label: string; url: string }> = {
+    wikipedia: { label: "um verbete ao acaso", url: "https://pt.wikipedia.org/wiki/Especial:Aleat%C3%B3ria" },
+    youtube: { label: "o que está em alta agora", url: "https://www.youtube.com/feed/trending" },
+    reddit: { label: "o mural r/popular", url: "https://www.reddit.com/r/popular/" },
+    mastodon: { label: "a linha Explorar", url: "https://mastodon.social/explore" },
+    lichess: { label: "partidas ao vivo (TV)", url: "https://lichess.org/tv" },
+    "itch-io": { label: "jogos independentes em destaque", url: "https://itch.io/games" },
+    openstreetmap: { label: "o mapa-múndi aberto", url: "https://www.openstreetmap.org/#map=3/-15/-55" },
+    "khan-academy": { label: "as trilhas de estudo", url: "https://pt.khanacademy.org/" },
+};
+
+for (const p of PLACES) {
+    if (CONTENT_VOLUME[p.id] !== undefined) p.contentVolume = CONTENT_VOLUME[p.id];
+    if (ENTRY_CONTENT[p.id] !== undefined) p.entryContent = ENTRY_CONTENT[p.id];
+}
+
 export const PLACE_BY_ID: Record<string, Place> = Object.fromEntries(
     PLACES.map((p) => [p.id, p]),
 );
@@ -790,12 +850,29 @@ export function entryUrl(place: Place): string {
     return place.entry ?? `https://${place.domains[0]}`;
 }
 
+/**
+ * Destino da expedição. Prefere um conteúdo específico (não a home), caindo
+ * para a porta de entrada quando não há um deep link confiável.
+ */
+export function expeditionTarget(place: Place): { url: string; label: string | null } {
+    if (place.entryContent) return { url: place.entryContent.url, label: place.entryContent.label };
+    return { url: entryUrl(place), label: null };
+}
+
 export const POPULATION_LABELS: Record<number, string> = {
     1: "menos de 1 milhão",
     2: "1 a 10 milhões",
     3: "10 a 100 milhões",
     4: "100 milhões a 1 bilhão",
     5: "mais de 1 bilhão",
+};
+
+export const CONTENT_VOLUME_LABELS: Record<number, string> = {
+    1: "acervo enxuto",
+    2: "acervo modesto",
+    3: "acervo amplo",
+    4: "acervo vasto",
+    5: "acervo colossal",
 };
 
 export function placesInCategory(category: CategoryId): Place[] {

@@ -202,9 +202,57 @@ test("brasil: 27 UFs únicas, células únicas, contribuição arredondada", () 
 });
 
 // ── Mundo RPG ─────────────────────────────────────────────────────────────
-import { generateWorld, discoveredSet, revealedRealms, visibilityOf, blindTarget, hiddenBetterAlternatives, epithet, EPITHET_GLOSSARY, REALMS, WORLD_W, WORLD_H } from "../world";
+import { generateWorld, discoveredSet, revealedRealms, visibilityOf, blindTarget, hiddenBetterAlternatives, epithet, EPITHET_GLOSSARY, REALMS, WORLD_W, WORLD_H, placeSigil, SIGIL_MEANING, contentVolumeOf, TERRAIN_BIOME } from "../world";
+import { expeditionTarget, entryUrl, CONTENT_VOLUME_LABELS } from "../catalog";
 import { discover, toggleLantern, addEcho, connect, setWriteBack, sanitizeState } from "../state";
 import { bookmarksHtml, expeditionIcs, linkFacets, discoveryPost, echoText, ECHO_TARGETS, passportJson, readPassport, mastodonVerify, mastodonPost, blueskyLogin, blueskyPost, fitText, normalizeInstance } from "../connectors";
+
+test("essência por local: sigilo definido, no glossário, e varia dentro de um reino", () => {
+    for (const p of PLACES) {
+        const sig = placeSigil(p);
+        assert.ok(SIGIL_MEANING[sig], `${p.id}: ${sig}`);
+    }
+    // dois territórios do mesmo reino (social) com essências diferentes
+    assert.notEqual(placeSigil(PLACE_BY_ID.instagram), placeSigil(PLACE_BY_ID.mastodon));
+    assert.equal(placeSigil(PLACE_BY_ID.instagram), "vortex"); // feed infinito + autoplay
+    assert.equal(placeSigil(PLACE_BY_ID.g1), "megaphone"); // anúncios, sem feed infinito
+    assert.equal(placeSigil(PLACE_BY_ID.mastodon), "network"); // federado
+    assert.equal(placeSigil(PLACE_BY_ID.signal), "shield"); // cripto
+    assert.equal(placeSigil(PLACE_BY_ID.tiktok), "vortex"); // feed+autoplay
+    assert.equal(placeSigil(PLACE_BY_ID.govbr), "columns"); // público
+});
+
+test("três volumes distintos: conteúdo ≠ população, com fallback honesto", () => {
+    // Wikipédia: poucos editores, conteúdo colossal → conteúdo > população
+    assert.ok(contentVolumeOf(PLACE_BY_ID.wikipedia) > (PLACE_BY_ID.wikipedia.population ?? 0));
+    // WhatsApp: muita gente, pouco conteúdo público → conteúdo < população
+    assert.ok(contentVolumeOf(PLACE_BY_ID.whatsapp) < (PLACE_BY_ID.whatsapp.population ?? 99));
+    // Sem override, cai para a população
+    const noOverride = PLACES.find((p) => p.contentVolume === undefined && p.population !== undefined)!;
+    assert.equal(contentVolumeOf(noOverride), noOverride.population);
+    for (const p of PLACES) {
+        const v = contentVolumeOf(p);
+        assert.ok(v >= 1 && v <= 5, p.id);
+        assert.ok(CONTENT_VOLUME_LABELS[v], p.id);
+    }
+});
+
+test("expedição desembarca em conteúdo real, com fallback para a porta", () => {
+    const wiki = expeditionTarget(PLACE_BY_ID.wikipedia);
+    assert.ok(wiki.label && wiki.url.startsWith("https://pt.wikipedia.org/wiki/Especial"));
+    // fallback: sem entryContent, usa a porta de entrada e não inventa rótulo
+    const fb = expeditionTarget(PLACE_BY_ID.whatsapp);
+    assert.equal(fb.label, null);
+    assert.equal(fb.url, entryUrl(PLACE_BY_ID.whatsapp));
+    // todo entryContent é https válido e aponta ao domínio do próprio lugar ou subdomínio conhecido
+    for (const p of PLACES) {
+        if (!p.entryContent) continue;
+        const u = new URL(p.entryContent.url);
+        assert.equal(u.protocol, "https:", p.id);
+        assert.ok(p.entryContent.label.length > 0, p.id);
+    }
+    assert.ok(TERRAIN_BIOME.clareira.biome && TERRAIN_BIOME.labirinto.biome);
+});
 
 test("mundo: determinístico, dentro dos limites, um território por lugar", () => {
     const a = generateWorld();

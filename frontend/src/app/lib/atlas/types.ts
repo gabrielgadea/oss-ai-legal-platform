@@ -91,6 +91,19 @@ export interface Place {
      * `undefined` = incerto (não inventamos).
      */
     population?: 1 | 2 | 3 | 4 | 5;
+    /**
+     * Volume de conteúdo produzido/hospedado, em ordem de grandeza (1–5).
+     * É distinto de `population`: a Wikipédia tem poucos editores e conteúdo
+     * imenso; uma mensageria tem muita gente e pouco conteúdo público.
+     * `undefined` = cai para a população (marcado como estimado na UI).
+     */
+    contentVolume?: 1 | 2 | 3 | 4 | 5;
+    /**
+     * Conteúdo específico (não a home) onde a expedição desembarca. Só é
+     * preenchido com deep links públicos e estáveis que conheço; caso
+     * contrário a expedição usa `entry`.
+     */
+    entryContent?: { label: string; url: string };
 }
 
 export type ScoreDimension = "privacy" | "attention" | "agency" | "openness";

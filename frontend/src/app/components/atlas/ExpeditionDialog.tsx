@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CalendarPlus, Compass, X } from "lucide-react";
-import { PLACE_BY_ID, POPULATION_LABELS, entryUrl } from "@/app/lib/atlas/catalog";
+import { PLACE_BY_ID, POPULATION_LABELS, expeditionTarget } from "@/app/lib/atlas/catalog";
 import { track } from "@/app/lib/atlas/analytics";
 import { downloadFile, expeditionIcs } from "@/app/lib/atlas/connectors";
 import { scoresFor } from "@/app/lib/atlas/scoring";
@@ -60,11 +60,12 @@ export function ExpeditionDialog({
         return () => document.removeEventListener("visibilitychange", onVis);
     }, [onDiscover, placeId]);
 
+    const target = expeditionTarget(place);
     const depart = () => {
         departedAt.current = Date.now();
         setPhase("away");
-        track("expedition_started", { realmKnown });
-        window.open(entryUrl(place), "_blank", "noopener,noreferrer");
+        track("expedition_started", { realmKnown, toContent: Boolean(target.label) });
+        window.open(target.url, "_blank", "noopener,noreferrer");
     };
 
     const schedule = () => {
@@ -104,7 +105,7 @@ export function ExpeditionDialog({
                         )}
                         <p className="mt-4 text-sm leading-relaxed text-[#4a3c27]">
                             Não há nome, marca ou reputação para julgar antes de ir. Só se descobre o que existe aqui
-                            <strong> indo</strong>: a porta de entrada abre em outra aba. Fique pelo menos{" "}
+                            <strong> indo</strong>: {target.label ? <>a expedição desembarca direto em <strong>{target.label}</strong>, em outra aba.</> : <>a porta de entrada abre em outra aba.</>} Fique pelo menos{" "}
                             {MIN_EXPEDITION_SECONDS} segundos explorando algum conteúdo e volte — o território será revelado.
                         </p>
 

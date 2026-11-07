@@ -38,30 +38,46 @@ estas terras. A semente é fixa: todos os viajantes habitam o **mesmo** mundo.
 3. **Revelado**: nome, epíteto, qualificação e população.
 4. **Habitado / verificado**: você tem tempo de uso, publicações ou laços lá (acampamento ⛺, selo de cera).
 
-**Só se revela indo.** A expedição (`ExpeditionDialog`) abre a porta de
-entrada real do território em outra aba, sem antes mostrar o nome. Se a aba
-do Atlas ficar oculta por pelo menos 45 segundos, a hachura se dissolve. O
-Atlas mede **apenas** quanto tempo a própria aba ficou em segundo plano. Não
-vê o que a pessoa faz do outro lado. Importações e conectores revelam
-territórios como **verificados**.
+**Só se revela indo, e indo a um conteúdo real.** A expedição
+(`ExpeditionDialog`) desembarca a pessoa, em outra aba, num **conteúdo
+específico** do território — não na home —, sem antes mostrar o nome. Quando
+há um deep link público e estável conhecido (`entryContent`), é ele que abre:
+um verbete ao acaso da Wikipédia (`Especial:Aleatória`), o "em alta" do
+YouTube (`/feed/trending`), o `r/popular` do Reddit, a linha Explorar do
+Mastodon, a TV do Lichess, etc. Onde não há um deep link confiável, cai para
+a porta de entrada — honestamente, sem inventar URL. Se a aba do Atlas ficar
+oculta por pelo menos 45 segundos, a hachura se dissolve. O Atlas mede
+**apenas** quanto tempo a própria aba ficou em segundo plano. Não vê o que a
+pessoa faz do outro lado. Importações e conectores revelam territórios como
+**verificados**.
 
 **Sem spoilers.** O catálogo aberto foi substituído pelo **Diário** (códice
 só do que foi revelado). Alternativas mais bem qualificadas ainda ocultas
 aparecem apenas como contagem ("há 3 territórios mais luminosos sob
 hachura"), com uma expedição às cegas.
 
-**Expressão visual da essência e da população**
+**Expressão visual: três volumes distintos + essência por local**
 
-| Camada | Significado |
-|---|---|
-| Glifo do reino (fogueira, espelho, pombal, torre, ondas, tenda, coluna, estandarte) | essência do conteúdo |
-| Quantidade de glifos (1–5) | população em ordem de grandeza (<1 mi … >1 bi); `?` = incerta, nunca inventada |
-| Textura do solo: relva / trilhas / labirinto | Clareira / Trilha / Labirinto |
-| Acampamento ⛺ | você habita (tempo de uso ou dados de conector) |
-| Lanterna 🏮 e contagem | lanternas acesas por você e pelo mundo |
-| Selo de cera | descoberta verificada por dados |
-| ❝ | rumor de alguém da sua caravana |
-| Viajantes (no painel) | pessoas do Atlas que revelaram o território (k ≥ 5) |
+Cada território do mapa expressa, em canais separados, as dimensões que o
+usuário pediu — volume de conteúdo, população e engajamento/conexões — além
+da essência do próprio lugar:
+
+| Canal | Codifica | Fonte |
+|---|---|---|
+| **Tamanho do território** | volume de **conteúdo** produzido/hospedado (ordem de grandeza 1–5) | catálogo (`contentVolume`), cai para a população quando incerto e marca "(estimado)" |
+| **Cabanas ⌂ (1–5)** | **população** / habitantes (ordem de grandeza <1 mi … >1 bi) | catálogo (`population`); `?` = incerta, nunca inventada |
+| **Lanternas 🏮 + nº de viajantes** | **engajamento e conexões** no Atlas | mundo compartilhado, agregado com k ≥ 5 |
+| **Sigilo central** | **essência do local** (não do reino): moeda=troca, escudo=cripto, vórtice=feed sem fim, megafone=anúncios, rede=federado, coração=doações, bússola=algoritmo à escolha, colunas=serviço público, relógio=cronológico, onda=feed infinito, ingresso=assinatura, névoa=incerto | derivado dos atributos |
+| Glifo do reino | essência do bairro (fogueira, espelho, pombal, torre, ondas, tenda, coluna, estandarte) | categoria |
+| Textura do solo + **bioma** | Clareira (Recife Bioluminescente) / Trilha (Planalto Temperado) / Labirinto (Bazar Cyberpunk) | qualificação |
+| Acampamento ⛺ | você habita (tempo de uso ou dados de conector) | estado pessoal |
+| Selo de cera | descoberta verificada por dados | estado pessoal |
+| ❝ | rumor de alguém da sua caravana | caravanas |
+
+Dois territórios do **mesmo reino** podem ter sigilos diferentes: Instagram
+(vórtice) e Mastodon (rede) são ambos da Praça, mas a essência de cada um
+aparece no centro. Assim o conteúdo, a quantidade de gente e o engajamento
+viram três leituras independentes do território.
 
 **Epítetos.** Cada território tem um nome de essência derivado dos
 atributos, nunca da marca. Exemplos: *Praça sem Coroa* (federado), *Galeria
@@ -245,6 +261,35 @@ navegador com medição local, importação de `.zip` do Takeout no próprio nav
 npm test --prefix backend              # agregação, k-anonimato, sanitização
 npm run test:atlas --prefix frontend   # catálogo, scoring, métricas, importadores, gamificação
 ```
+
+## 7.1 Relação com o "Blueprint do Atlas Cognitivo-Digital" e fronteira ética
+
+Este módulo adota a **visão de produto e a estética** do blueprint: mapa como
+cosmologia navegável, zoom semântico contínuo, biomas (Recife Bioluminescente,
+Bazar Cyberpunk, Biblioteca Ciber-Alexandrina, Ágora Clássica), altitude
+epistêmica, diversidade de Rao-Stirling, divergência KL como "câmara de eco",
+portais por SLERP, arquitetura local-first, privacidade diferencial e
+k-anonimato. Boa parte já está implementada; os sigilos, biomas, os três
+volumes e a expedição a conteúdo real vieram desta rodada.
+
+**O que foi deliberadamente NÃO implementado.** Os Módulos 3 (Níveis 3–4,
+"Terraformador") e 3.2 e 4 do blueprint descrevem agentes que, operando dentro
+da sessão autenticada da pessoa, **reprogramam os algoritmos de recomendação de
+terceiros** (YouTube, TikTok, Instagram, X) com **evasão ativa de detecção
+anti-bot** (Cloudflare, reCAPTCHA v3), **simulação de comportamento humano**
+(processos de Poisson, curvas de Bézier, ruído browniano) para não ser
+detectado, e **interceptação de tráfego via túnel VPN loopback**. Isso é
+automação encoberta contra as defesas das plataformas e burla de termos de uso.
+Não foi construído — não é limitação técnica, é uma escolha de projeto.
+
+**A alternativa adotada para o mesmo fim (soberania atencional).** O Atlas dá à
+pessoa consciência (o mapa, a qualificação, a câmara de eco) e **ela mesma**
+age, de forma transparente e reversível, pelas APIs e intents **oficiais**
+(Mastodon, Bluesky, Web Share, favoritos, agenda). Soberania pela percepção e
+pela escolha informada, não por um robô agindo escondido no lugar dela. Os
+Níveis 0–2 do blueprint (espelho, consultor, fricção na própria interface via
+extensão) são compatíveis com essa linha e podem ser retomados no futuro; os
+Níveis 3–4, não.
 
 ## 8. Limitações conhecidas
 

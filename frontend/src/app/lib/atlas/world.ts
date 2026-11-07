@@ -201,8 +201,14 @@ export interface WorldGeometry {
     territories: Territory[];
 }
 
+/** Volume de conteúdo efetivo (cai para a população quando não há dado). */
+export function contentVolumeOf(p: Place): number {
+    return p.contentVolume ?? p.population ?? 2;
+}
+
+/** O tamanho do território expressa o VOLUME DE CONTEÚDO produzido/hospedado. */
 function territoryRadius(p: Place): number {
-    return 22 + (p.population ?? 2) * 4;
+    return 18 + contentVolumeOf(p) * 4;
 }
 
 /**
@@ -366,4 +372,64 @@ export const EPITHET_GLOSSARY: Record<string, string> = {
     "das Trocas": "vive de transações",
     "do Relógio": "ordem cronológica disponível",
     "das Brumas": "atributos ainda pouco conhecidos",
+};
+
+/**
+ * Sigilo da essência do LOCAL (não do reino). Dois territórios do mesmo
+ * reino podem ter sigilos diferentes, expressando o que cada um é por dentro.
+ * A ordem de prioridade acompanha a do epíteto, para que marca e nome batam.
+ */
+export type Sigil =
+    | "network"
+    | "columns"
+    | "shield"
+    | "compass"
+    | "vortex"
+    | "heart"
+    | "wave"
+    | "megaphone"
+    | "ticket"
+    | "coin"
+    | "clock"
+    | "mist";
+
+export function placeSigil(place: Place): Sigil {
+    const a = place.attributes;
+    if (a.federated === "yes") return "network";
+    if (a.businessModel === "public") return "columns";
+    if (a.e2eDefault === true) return "shield";
+    if (a.feedChoice === true) return "compass";
+    if (a.infiniteFeed === true && a.autoplay === true) return "vortex";
+    if (a.businessModel === "donation") return "heart";
+    if (a.infiniteFeed === true) return "wave";
+    if (a.businessModel === "ads") return "megaphone";
+    if (a.businessModel === "subscription") return "ticket";
+    if (a.businessModel === "transaction") return "coin";
+    if (a.chronologicalOption === true) return "clock";
+    return "mist";
+}
+
+export const SIGIL_MEANING: Record<Sigil, string> = {
+    network: "federado — nenhum dono único",
+    columns: "serviço público",
+    shield: "criptografia ponta-a-ponta",
+    compass: "você escolhe o algoritmo",
+    vortex: "feed infinito com autoplay",
+    heart: "sustentado por doações",
+    wave: "feed infinito",
+    megaphone: "financiado por anúncios",
+    ticket: "pago por assinatura",
+    coin: "vive de transações",
+    clock: "ordem cronológica disponível",
+    mist: "essência ainda pouco conhecida",
+};
+
+/**
+ * Bioma do terreno (linguagem do blueprint do Atlas Cognitivo): traduz o
+ * terreno de qualificação numa paisagem arquetípica.
+ */
+export const TERRAIN_BIOME: Record<string, { biome: string; blurb: string }> = {
+    clareira: { biome: "Recife Bioluminescente", blurb: "águas claras, portos abertos, luz própria" },
+    trilha: { biome: "Planalto Temperado", blurb: "relevo misto, trilhas que pedem atenção" },
+    labirinto: { biome: "Bazar Cyberpunk", blurb: "vielas sem fim, letreiros que não apagam" },
 };

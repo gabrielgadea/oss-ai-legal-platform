@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Minus, Plus, Maximize2 } from "lucide-react";
 import type { AtlasWorldStats } from "@/app/lib/mikeApi";
-import { PLACE_BY_ID, POPULATION_LABELS } from "@/app/lib/atlas/catalog";
+import { CONTENT_VOLUME_LABELS, PLACE_BY_ID, POPULATION_LABELS } from "@/app/lib/atlas/catalog";
 import { formatMinutes } from "@/app/lib/atlas/metrics";
 import { scoresFor, TERRAIN_INFO } from "@/app/lib/atlas/scoring";
 import type { AtlasState, CategoryId, EffectiveUsage, Terrain } from "@/app/lib/atlas/types";
@@ -13,9 +13,12 @@ import {
     WORLD_H,
     WORLD_W,
     blindTarget,
+    contentVolumeOf,
     epithet,
     generateWorld,
+    placeSigil,
     visibilityOf,
+    type Sigil,
     type Territory,
 } from "@/app/lib/atlas/world";
 
@@ -94,11 +97,93 @@ export function EssenceGlyph({ realm, size = 14, color = INK }: { realm: Categor
     );
 }
 
-function GlyphAt({ realm, x, y, size, color = INK }: { realm: CategoryId; x: number; y: number; size: number; color?: string }) {
+/**
+ * Sigilo da essência do LOCAL (não do reino): expressa, por dentro, o que
+ * aquele território é — moeda (troca), escudo (cripto), vórtice (feed sem fim),
+ * megafone (anúncios), rede (federado), coração (doações), etc.
+ */
+export function PlaceSigilMark({ sigil, size = 16, color = INK }: { sigil: Sigil; size?: number; color?: string }) {
+    const s = { fill: "none", stroke: color, strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+    const g = (() => {
+        switch (sigil) {
+            case "network":
+                return (
+                    <>
+                        <circle cx="10" cy="4" r="2" {...s} />
+                        <circle cx="4" cy="15" r="2" {...s} />
+                        <circle cx="16" cy="15" r="2" {...s} />
+                        <path d="M10 6L5 13M10 6l5 7M6 15h8" {...s} />
+                    </>
+                );
+            case "columns":
+                return (
+                    <>
+                        <path d="M3 6l7-3 7 3M4 16h12" {...s} />
+                        <path d="M6 7v8M10 7v8M14 7v8" {...s} />
+                    </>
+                );
+            case "shield":
+                return (
+                    <>
+                        <path d="M10 3l6 2v5c0 4-3 6-6 7-3-1-6-3-6-7V5z" {...s} fill={color} fillOpacity={0.18} />
+                        <path d="M7.5 10l2 2 3.5-4" {...s} />
+                    </>
+                );
+            case "compass":
+                return (
+                    <>
+                        <circle cx="10" cy="10" r="7" {...s} />
+                        <path d="M10 10l4-4-2.5 6L6 14z" {...s} fill={color} fillOpacity={0.3} />
+                    </>
+                );
+            case "vortex":
+                return <path d="M10 10m0-7a7 7 0 1 1-6 3.5 5 5 0 1 0 8 2 3 3 0 1 1-4 1" {...s} />;
+            case "heart":
+                return <path d="M10 16C4 12 3 8 5.5 6a3 3 0 0 1 4.5.5A3 3 0 0 1 14.5 6C17 8 16 12 10 16z" {...s} fill={color} fillOpacity={0.2} />;
+            case "wave":
+                return (
+                    <>
+                        <path d="M3 7q3.5-4 7 0t7 0" {...s} />
+                        <path d="M3 12q3.5-4 7 0t7 0" {...s} />
+                        <path d="M3 17q3.5-4 7 0t7 0" {...s} />
+                    </>
+                );
+            case "megaphone":
+                return (
+                    <>
+                        <path d="M4 8v4l9 4V4zM4 8H3v4h1" {...s} fill={color} fillOpacity={0.18} />
+                        <path d="M15 8a3 3 0 0 1 0 4" {...s} />
+                    </>
+                );
+            case "ticket":
+                return (
+                    <>
+                        <path d="M3 7h14v3a1.5 1.5 0 0 0 0 3v0H3v0a1.5 1.5 0 0 0 0-3z" {...s} />
+                        <path d="M11 7v6" {...{ ...s, strokeDasharray: "1.5 1.5" }} />
+                    </>
+                );
+            case "coin":
+                return (
+                    <>
+                        <circle cx="10" cy="10" r="7" {...s} />
+                        <path d="M10 6v8M7.5 8h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4" {...s} />
+                    </>
+                );
+            case "clock":
+                return (
+                    <>
+                        <circle cx="10" cy="10" r="7" {...s} />
+                        <path d="M10 6v4l3 2" {...s} />
+                    </>
+                );
+            default:
+                return <path d="M7 8a3 3 0 1 1 4 2.8c-.8.5-1 1-1 2M10 15v.5" {...s} />;
+        }
+    })();
     return (
-        <g transform={`translate(${x - size / 2},${y - size / 2})`} className="pointer-events-none">
-            <EssenceGlyph realm={realm} size={size} color={color} />
-        </g>
+        <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden>
+            {g}
+        </svg>
     );
 }
 
@@ -317,7 +402,9 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
                         const s = scoresFor(t.placeId);
                         const min = minutes.get(t.placeId) ?? 0;
                         const pop = place.population;
-                        const glyphs = pop ?? 1;
+                        const sigil = placeSigil(place);
+                        const sigilSize = Math.min(30, t.radius * 0.8);
+                        const huts = pop ?? 1; // cabanas = população (habitantes)
                         const stats = world[t.placeId];
                         const fresh = justRevealed.includes(t.placeId);
                         const lit = Boolean(state.lanterns[t.placeId]);
@@ -326,19 +413,30 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
                         return (
                             <g key={t.placeId} className={`cursor-pointer ${fresh ? "atlas-reveal" : ""}`} onClick={click(() => onSelect(t.placeId))}>
                                 <title>
-                                    {`${place.name} — ${epithet(place)}\n${TERRAIN_INFO[s.terrain].label} · saúde ${s.health}\nPopulação: ${pop ? POPULATION_LABELS[pop] : "incerta"}${min ? `\nVocê: ${formatMinutes(min)}/semana` : ""}${stats?.travelers ? `\n${stats.travelers} viajantes do Atlas` : ""}`}
+                                    {`${place.name} — ${epithet(place)}\n${TERRAIN_INFO[s.terrain].label} · saúde ${s.health}` +
+                                        `\nConteúdo: ${CONTENT_VOLUME_LABELS[contentVolumeOf(place)]}${place.contentVolume ? "" : " (estimado)"}` +
+                                        `\nPopulação: ${pop ? POPULATION_LABELS[pop] : "incerta"}` +
+                                        `${min ? `\nVocê: ${formatMinutes(min)}/semana` : ""}` +
+                                        `${stats?.travelers ? `\nEngajamento: ${stats.travelers} viajantes${stats.lanterns ? `, ${stats.lanterns} lanternas` : ""}` : ""}`}
                                 </title>
                                 <path d={t.path} fill={realm.color} fillOpacity={min > 0 ? 0.42 : 0.22} stroke={INK} strokeWidth={isSel ? 3 : 1.6} />
                                 <path d={t.path} fill={TERRAIN_PATTERN[s.terrain]} className="pointer-events-none" />
                                 {fresh && <path d={t.path} fill="#fff7c2" className="atlas-glow pointer-events-none" />}
-                                {/* Assentamentos: um glifo de essência por ordem de grandeza de população */}
-                                {Array.from({ length: glyphs }, (_, i) => {
-                                    const ang = (i / glyphs) * Math.PI * 2 - Math.PI / 2;
-                                    const rr = glyphs === 1 ? 0 : t.radius * 0.42;
-                                    return <GlyphAt key={i} realm={realm.id} x={t.center.x + Math.cos(ang) * rr} y={t.center.y - 4 + Math.sin(ang) * rr} size={glyphs === 1 ? 18 : 13} />;
+                                {/* Sigilo central: a essência DESTE local (tamanho do território = volume de conteúdo) */}
+                                <g transform={`translate(${t.center.x - sigilSize / 2},${t.center.y - sigilSize / 2 - 3})`} className="pointer-events-none">
+                                    <PlaceSigilMark sigil={sigil} size={sigilSize} />
+                                </g>
+                                {/* Cabanas: uma por ordem de grandeza de população (habitantes) */}
+                                {Array.from({ length: huts }, (_, i) => {
+                                    const spread = (huts - 1) * 7;
+                                    const hx = t.center.x - spread / 2 + i * 7;
+                                    const hy = t.center.y + t.radius * 0.5;
+                                    return (
+                                        <path key={i} d={`M${hx - 2.6} ${hy + 3}l2.6-3 2.6 3z`} fill={INK} fillOpacity={0.75} className="pointer-events-none" />
+                                    );
                                 })}
                                 {!pop && (
-                                    <text x={t.center.x + 11} y={t.center.y - 10} className="pointer-events-none" style={{ fontSize: 9, fill: INK }}>?</text>
+                                    <text x={t.center.x} y={t.center.y + t.radius * 0.5 + 4} textAnchor="middle" className="pointer-events-none" style={{ fontSize: 9, fill: INK }}>?</text>
                                 )}
                                 {/* Seu acampamento: você habita aqui */}
                                 {(min > 0 || inh) && (
@@ -430,12 +528,11 @@ function MapLegend() {
                 <svg width="18" height="14"><rect width="18" height="14" fill="url(#legend-hatch)" /><defs><pattern id="legend-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="5" height="5" fill="#e6d9b8" /><path d="M0 0V5" stroke={INK} /></pattern></defs></svg>
                 Hachura = ainda não explorado
             </span>
-            <span className="flex items-center gap-1.5">
-                <EssenceGlyph realm="knowledge" size={14} /><EssenceGlyph realm="knowledge" size={14} />
-                Glifos = essência; quantidade = população
-            </span>
+            <span className="flex items-center gap-1.5"><PlaceSigilMark sigil="shield" size={15} /> Sigilo = essência do local</span>
+            <span className="flex items-center gap-1.5"><svg width="26" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke={INK} /><circle cx="19" cy="7" r="2.5" fill="none" stroke={INK} /></svg> Tamanho = volume de conteúdo</span>
+            <span className="flex items-center gap-1.5"><svg width="24" height="12"><path d="M2 10l2.6-3 2.6 3zM9 10l2.6-3 2.6 3zM16 10l2.6-3 2.6 3z" fill={INK} fillOpacity="0.75" /></svg> Cabanas = população</span>
             <span className="flex items-center gap-1.5"><svg width="14" height="12"><path d="M0 11L7 1l7 10z" fill="#1f2937" /></svg> Você habita</span>
-            <span className="flex items-center gap-1.5"><svg width="12" height="14"><rect x="2" y="3" width="8" height="10" rx="2" fill="#f5b400" stroke={INK} /></svg> Lanterna</span>
+            <span className="flex items-center gap-1.5"><svg width="12" height="14"><rect x="2" y="3" width="8" height="10" rx="2" fill="#f5b400" stroke={INK} /></svg> Lanterna = engajamento</span>
             <span className="flex items-center gap-1.5"><svg width="12" height="12"><circle cx="6" cy="6" r="5.5" fill="#8f2d26" /></svg> Verificado</span>
             <span className="flex items-center gap-1.5"><span className="font-bold">❝</span> Rumor da caravana</span>
             {(Object.keys(TERRAIN_INFO) as Terrain[]).map((t) => (

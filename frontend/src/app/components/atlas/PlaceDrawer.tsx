@@ -2,13 +2,23 @@
 
 import { Compass, Flame, Share2, Users, X } from "lucide-react";
 import type { AtlasWorldStats } from "@/app/lib/mikeApi";
-import { CATALOG_REVISION, PLACE_BY_ID, POPULATION_LABELS } from "@/app/lib/atlas/catalog";
+import { CATALOG_REVISION, CONTENT_VOLUME_LABELS, PLACE_BY_ID, POPULATION_LABELS } from "@/app/lib/atlas/catalog";
 import { QUALITY_LABELS, formatMinutes } from "@/app/lib/atlas/metrics";
 import { alternativesFor } from "@/app/lib/atlas/multiverse";
 import { attributeHighlights, scoresFor, TERRAIN_INFO } from "@/app/lib/atlas/scoring";
 import type { AtlasState, CategoryId, EffectiveUsage, RouteDecision } from "@/app/lib/atlas/types";
-import { REALM_BY_ID, VOCAB, epithet, hiddenBetterAlternatives, visibilityOf } from "@/app/lib/atlas/world";
-import { EssenceGlyph } from "./WorldMap";
+import {
+    REALM_BY_ID,
+    SIGIL_MEANING,
+    TERRAIN_BIOME,
+    VOCAB,
+    contentVolumeOf,
+    epithet,
+    hiddenBetterAlternatives,
+    placeSigil,
+    visibilityOf,
+} from "@/app/lib/atlas/world";
+import { EssenceGlyph, PlaceSigilMark } from "./WorldMap";
 import { ScoreBars, TerrainBadge } from "./ui";
 
 const DECISIONS: { id: RouteDecision; label: string; help: string }[] = [
@@ -130,9 +140,39 @@ export function PlaceDrawer(props: Props) {
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                     <TerrainBadge terrain={scores.terrain} />
                     <span>Saúde <strong className="tabular-nums">{scores.health}</strong>/100</span>
-                    <span className="text-xs text-gray-500">· população {place.population ? POPULATION_LABELS[place.population] : "incerta"}</span>
+                    <span className="text-xs text-gray-500">· bioma {TERRAIN_BIOME[scores.terrain].biome}</span>
                 </div>
                 <p className="-mt-3 text-xs text-gray-500">{TERRAIN_INFO[scores.terrain].description}</p>
+
+                {/* Essência do local + os três volumes */}
+                <div className="rounded-xl border border-[#e4d9bc] bg-[#f8f1df] p-3">
+                    <div className="flex items-center gap-2">
+                        <PlaceSigilMark sigil={placeSigil(place)} size={22} />
+                        <span className="text-sm font-medium text-[#2b2216]">Essência: {SIGIL_MEANING[placeSigil(place)]}</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-lg bg-white/60 p-2">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">Conteúdo</div>
+                            <div className="text-sm font-semibold text-gray-900">{CONTENT_VOLUME_LABELS[contentVolumeOf(place)]}</div>
+                            {!place.contentVolume && <div className="text-[9px] text-gray-400">estimado</div>}
+                        </div>
+                        <div className="rounded-lg bg-white/60 p-2">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">População</div>
+                            <div className="text-sm font-semibold text-gray-900">{place.population ? POPULATION_LABELS[place.population] : "incerta"}</div>
+                        </div>
+                        <div className="rounded-lg bg-white/60 p-2" title="Engajamento e conexões no Atlas (agregado, a partir de 5 pessoas)">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">Engajamento</div>
+                            <div className="text-sm font-semibold text-gray-900">
+                                {stats?.travelers ? `${stats.travelers} viajantes` : "—"}
+                            </div>
+                            <div className="text-[9px] text-gray-400">{fmtCount(stats?.lanterns)} lanternas</div>
+                        </div>
+                    </div>
+                    <p className="mt-2 text-[10px] leading-snug text-gray-500">
+                        O território no mapa é maior quanto mais conteúdo; tem mais cabanas quanto mais gente; e acende
+                        lanternas conforme o engajamento de quem o habita.
+                    </p>
+                </div>
 
                 <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-700">
                     {u ? (
