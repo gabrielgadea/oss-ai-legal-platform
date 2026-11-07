@@ -815,3 +815,56 @@ export async function deleteWorkflowShare(
         method: "DELETE",
     });
 }
+
+// ---------------------------------------------------------------------------
+// Atlas Digital
+// ---------------------------------------------------------------------------
+
+const jsonInit = (method: string, body: unknown): RequestInit => ({
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+});
+
+export async function getAtlasState(): Promise<{ state: unknown | null }> {
+    return apiRequest("/atlas/state");
+}
+
+export async function saveAtlasState(state: unknown): Promise<void> {
+    await apiRequest<void>("/atlas/state", jsonInit("PUT", { state }));
+}
+
+export async function deleteAtlasData(): Promise<void> {
+    await apiRequest<void>("/atlas/state", { method: "DELETE" });
+}
+
+export async function submitAtlasContribution(contribution: unknown): Promise<void> {
+    await apiRequest<void>("/atlas/contribution", jsonInit("POST", contribution));
+}
+
+export async function deleteAtlasContribution(): Promise<void> {
+    await apiRequest<void>("/atlas/contribution", { method: "DELETE" });
+}
+
+export async function getAtlasBrazil(): Promise<{
+    k: number;
+    windowDays: number;
+    aggregates: unknown[];
+    totalParticipants: number;
+}> {
+    return apiRequest("/atlas/brazil");
+}
+
+export async function sendAtlasEvents(
+    events: { name: string; props?: Record<string, string | number | boolean>; at: string }[],
+): Promise<void> {
+    await apiRequest<void>("/atlas/events", jsonInit("POST", { events }));
+}
+
+export async function getAtlasAnalyticsOverview(): Promise<{
+    windowDays: number;
+    events: { name: string; count: number; users: number }[];
+    funnel: { step: string; users: number }[];
+}> {
+    return apiRequest("/atlas/analytics/overview");
+}

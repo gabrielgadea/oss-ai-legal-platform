@@ -7,6 +7,8 @@ Open-source release containing the Mike frontend and backend.
 - `frontend/` - Next.js application
 - `backend/` - Express API, Supabase access, document processing, and migrations
 - `backend/migrations/000_one_shot_schema.sql` - one-shot Supabase schema for fresh databases
+- `backend/migrations/001_atlas_digital.sql` - Atlas Digital tables (apply after the base schema)
+- `docs/atlas-digital.md` - Atlas Digital: digital-activity map, methodology, privacy (LGPD)
 
 ## Setup
 
@@ -53,6 +55,8 @@ Open `http://localhost:3000`.
 npm run build --prefix backend
 npm run build --prefix frontend
 npm run lint --prefix frontend
+npm test --prefix backend
+npm run test:atlas --prefix frontend
 ```
 
 ## License
