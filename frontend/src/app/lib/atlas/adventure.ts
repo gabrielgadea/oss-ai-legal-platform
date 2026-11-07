@@ -170,6 +170,82 @@ function hashStr(s: string): number {
     return h >>> 0;
 }
 
+// ── Ruído (procedural-gen: fBm com sementes independentes) ─────────────────
+
+/**
+ * Ruído de VALOR 2D (não-gradiente): valores aleatórios por vértice da grade,
+ * interpolados com smoothstep. Determinístico por semente e sem dependências.
+ * Retorna ~0..1 e não zera nos pontos inteiros (ao contrário do Perlin).
+ */
+export function valueNoise(seed: number): (x: number, y: number) => number {
+    const hash = (ix: number, iy: number) => {
+        let h = Math.imul(ix, 374761393) ^ Math.imul(iy, 668265263) ^ Math.imul(seed | 0, 1274126177);
+        h = Math.imul(h ^ (h >>> 13), 1274126177);
+        h ^= h >>> 16;
+        return (h >>> 0) / 4294967296;
+    };
+    return (x: number, y: number) => {
+        const ix = Math.floor(x);
+        const iy = Math.floor(y);
+        const fx = x - ix;
+        const fy = y - iy;
+        const sx = fx * fx * (3 - 2 * fx);
+        const sy = fy * fy * (3 - 2 * fy);
+        const a = hash(ix, iy);
+        const b = hash(ix + 1, iy);
+        const c = hash(ix, iy + 1);
+        const d = hash(ix + 1, iy + 1);
+        return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+    };
+}
+
+/** Fractal Brownian motion: soma de oitavas normalizada de volta para 0..1. */
+export function fbm(
+    noise: (x: number, y: number) => number,
+    x: number,
+    y: number,
+    octaves = 4,
+    lacunarity = 2,
+    gain = 0.5,
+): number {
+    let total = 0;
+    let amp = 1;
+    let freq = 1;
+    let norm = 0;
+    for (let i = 0; i < octaves; i++) {
+        total += amp * noise(x * freq, y * freq);
+        norm += amp;
+        amp *= gain;
+        freq *= lacunarity;
+    }
+    return total / norm;
+}
+
+export function smoothstep(e0: number, e1: number, x: number): number {
+    const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+}
+
+const VEGETATION: ReadonlySet<DecorKind> = new Set(["tree", "autumnTree", "pine", "palm", "bush", "mushroom"]);
+const MINERAL: ReadonlySet<DecorKind> = new Set(["mountain", "snowMountain", "rock", "cactus", "dune", "hill"]);
+
+/**
+ * Probabilidade de aceitar uma decoração num ponto: vegetação se aglomera
+ * onde o campo "floresta" é alto, minerais onde o campo "rocha" é alto. Os
+ * dois campos usam sementes diferentes para não se alinharem em faixas.
+ */
+export function clusterAcceptance(
+    kind: DecorKind,
+    x: number,
+    y: number,
+    forest: (x: number, y: number) => number,
+    rocky: (x: number, y: number) => number,
+): number {
+    if (VEGETATION.has(kind)) return smoothstep(0.36, 0.7, fbm(forest, x / 70, y / 70));
+    if (MINERAL.has(kind)) return smoothstep(0.34, 0.68, fbm(rocky, x / 90, y / 90));
+    return 0.6;
+}
+
 /** Ponto de uma curva quadrática. */
 export function quadPoint(r: Road, t: number): Pt {
     const u = 1 - t;
@@ -242,6 +318,8 @@ export function generateDecorations(world: WorldGeometry, roads: Road[]): Decora
         const inner = shrink(poly, realm.center, 0.88);
         const towns = world.territories.filter((t) => t.realm === realm.id);
         const rand = seededRandom(hashStr("decor:" + realm.id));
+        const forest = valueNoise(hashStr("forest:" + realm.id));
+        const rocky = valueNoise(hashStr("rock:" + realm.id));
         const target = Math.round(polygonArea(inner) / style.density);
         const free = (x: number, y: number, pad = 0) =>
             pointInPolygon({ x, y }, inner) &&
@@ -249,12 +327,15 @@ export function generateDecorations(world: WorldGeometry, roads: Road[]): Decora
             roadPts.every((p) => Math.hypot(p.x - x, p.y - y) > ROAD_CLEARANCE + pad);
         let placed = 0;
         let tries = 0;
-        while (placed < target && tries < target * 12) {
+        // Tentativas limitadas (a skill alerta contra laços sem teto).
+        while (placed < target && tries < target * 30) {
             tries++;
             const x = realm.center.x + (rand() * 2 - 1) * realm.radius * 1.15;
             const y = realm.center.y + (rand() * 2 - 1) * realm.radius * 1.15;
             if (!free(x, y)) continue;
             const kind = pickWeighted(rand, style.decor);
+            // aglomerados naturais: florestas e cordilheiras em manchas, com clareiras
+            if (rand() > clusterAcceptance(kind, x, y, forest, rocky)) continue;
             if (kind === "mountain" || kind === "snowMountain") {
                 // cordilheira: 3–5 picos agrupados
                 const peaks = 3 + Math.floor(rand() * 3);

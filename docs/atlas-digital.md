@@ -42,6 +42,64 @@ asset, nome ou interface de jogo existente foi copiado:
 
 **Cosmos** — o estilo futurista anterior (descrito abaixo), mantido como opção.
 
+### 0.0.1 Aplicação das skills de game dev (`awesome-gamedev-agent-skills`)
+
+O mapa de Aventura foi revisado com a metodologia do repositório
+[gamedev-skills/awesome-gamedev-agent-skills](https://github.com/gamedev-skills/awesome-gamedev-agent-skills),
+usado como **referência de leitura**: nada foi instalado nem copiado para o
+projeto. Pelo roteador do repositório, o motor é **customizado** (Canvas 2D +
+React), então valem as skills de *disciplina*, independentes de motor:
+
+| Skill | O que mudou | Onde |
+|---|---|---|
+| `procedural-gen` | fBm (value noise + oitavas normalizadas) com **sementes descorrelacionadas** para "floresta" e "rocha": as decorações formam bosques e clareiras em vez de uma camada uniforme. O terreno ganhou mosqueado por fBm. Os laços de posicionamento têm limite (`target × 30`). O PRNG próprio (mulberry32) tem as **primeiras saídas fixadas em teste**, para que sementes compartilhadas sobrevivam a atualizações. | `adventure.ts` (`valueNoise`, `fbm`, `clusterAcceptance`), `renderTerrain` |
+| `game-feel` | Três níveis de feedback proporcionais ao evento. **Pequeno**: poeira na chegada. **Médio**: faíscas douradas e tremor leve ao coletar um baú. **Grande**: anel de luz, tremor e *pop* do castelo com *squash & stretch* (`easeOutBack`) ao revelar um território. O tremor usa trauma² com decaimento e é somado à câmera, sem mover o Cartógrafo. O Cartógrafo **desliza** com `easeInOutCubic` (a lógica muda na hora; o desenho alcança), e a névoa e os baús se revelam **na chegada**. | `AdventureMap.tsx` |
+| `camera-systems` | Seguimento **exponencial independente de FPS** (`1 − e^(−taxa·dt)`), zona morta (16% × 14% da visão), antecipação na direção do movimento, limites do mundo e foco suave no território revelado. | `AdventureMap.tsx` |
+| `game-ui-ux` | Rótulos em **tamanho fixo de tela** (14 px nome, 12 px epíteto) com *declutter* por prioridade (selecionado > habitado > verificado > volume) e nível de detalhe (o epíteto só aparece com zoom). **Teclado**: setas/WASD movem, +/− aproximam, C centraliza, com anel de foco visível. Opção **"Reduzir movimento"**, que respeita `prefers-reduced-motion` e desliga tremor e animações. O tooltip re-renderiza só quando o alvo muda. | `AdventureMap.tsx` |
+| `performance-optimization` | Metodologia "medir → achar o gargalo → corrigir → medir de novo", em **build de produção**, com o harness CDP descrito abaixo. | ver tabela abaixo |
+
+**Medições** (Chromium headless, rasterização por software, 1440×1000, 12
+territórios; 300 movimentos do mouse + 6 cliques; mediana de 3 execuções):
+
+| Versão | Mouse: ms/evento (total) | Mouse: JS | 6 cliques | Tarefas longas |
+|---|---|---|---|---|
+| Antes (redesenho via estado React) | 1,86 | 295 ms | 138 ms (sem animação) | 0 |
+| Nova arquitetura, 1ª medição | 5,07 | 105 ms | 855 ms | 4 × ~60 ms |
+| + reconstrução por retângulo sujo e dependências por conteúdo | 4,6 | 97 ms | 700 ms | **0** |
+| + LOD de reamostragem (bilinear com ratio ≥ 0,5) | **2,7** | **103 ms** | **410 ms** (com ~6 s de animação a 60 fps) | **0** |
+
+O que a medição mostrou e o que foi feito:
+
+1. **Gargalo do quadro.** Desligando camadas uma a uma, ~70% do custo vinha do
+   *blit* da cena 2× com `imageSmoothingQuality = "high"`, rasterizada no
+   *commit*. Testados sem ganho: recortar a fonte, `ImageBitmap` e canvas em
+   CPU (`willReadFrequently`). Corrigiu: usar bilinear quando a redução é de
+   até 2:1, porque o filtro lê 2 texels por eixo e nenhum é pulado. Os
+   mipmaps ficam para zoom muito afastado. `"medium"` mediu pior que ambos e
+   foi descartado.
+2. **Tarefas longas na chegada.** Cada reconstrução total da cena custava
+   ~45 ms, justamente quando o *feedback* toca. Corrigiu: (a) redesenhar só o
+   **retângulo sujo** (células de névoa novas, baú coletado, castelo que
+   assentou); (b) depender do **conteúdo** de `discovered`/`usage`, que eram
+   recriados a cada passo do Cartógrafo.
+3. **Loop sob demanda.** `requestAnimationFrame` só roda enquanto há animação.
+   Em repouso, nenhum quadro é desenhado. O minimapa só é redesenhado quando a
+   câmera, o Cartógrafo ou a cena mudam.
+
+Leitura honesta: no ambiente medido, o custo *total* por movimento do mouse
+ainda é ~45% maior que o da versão antiga. A causa é que a nova reamostra a
+cena a cada quadro, por causa das animações, e a antiga desenhava tudo em
+modo imediato por um caminho que não consegui isolar. Mesmo assim fica em
+~16% do orçamento de 16,7 ms, e o JS caiu 65%. Em GPU real a reamostragem
+tende a ser bem mais barata, **mas isso não foi medido aqui**.
+
+Medidor opcional: `localStorage.setItem("atlas:perf", "1")` expõe em
+`window.__atlasPerf` o custo de JS por quadro (últimos 600) e em
+`window.__atlasBuild` o custo de cada reconstrução da cena.
+
+Lacunas: o repositório de skills não tem skill de gênero estratégia/4X.
+Pathfinding real (A* sobre o terreno) e áudio ficaram fora do escopo.
+
 ## 0. Estética: cosmos neural de dados
 
 O mapa não usa a linguagem de pergaminho medieval, e sim a de um **cosmos

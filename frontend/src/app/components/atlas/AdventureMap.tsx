@@ -10,8 +10,10 @@ import { FOG_CELL, generateMarks, reachTowards, type Budget, type MoveResult } f
 import {
     BIOME_STYLE,
     REALM_BIOME,
+    fbm,
     generateAdventure,
     quadPoint,
+    valueNoise,
     type Decoration,
 } from "@/app/lib/atlas/adventure";
 import type { AtlasState, CategoryId, EffectiveUsage, ExpeditionState } from "@/app/lib/atlas/types";
@@ -343,17 +345,23 @@ function renderTerrain(canvas: HTMLCanvasElement, scale: number) {
         ctx.clip(land);
         const realm = REALM_BY_ID[isl.realm];
         const tr = rng(realm.center.x * 31 + realm.center.y);
-        for (let i = 0; i < 46; i++) {
-            const px = realm.center.x + (tr() * 2 - 1) * realm.radius * 1.1;
-            const py = realm.center.y + (tr() * 2 - 1) * realm.radius * 1.1;
-            const rad = 18 + tr() * 46;
-            const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
-            const c = tr() > 0.5 ? style.groundDark : style.groundLight;
-            g.addColorStop(0, c);
-            g.addColorStop(1, "rgba(0,0,0,0)");
-            ctx.globalAlpha = 0.45;
-            ctx.fillStyle = g;
-            ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2);
+        // relevo do chão por fBm: manchas contínuas claras/escuras (procedural-gen)
+        const tex = valueNoise(Math.round(realm.center.x * 7 + realm.center.y * 13));
+        const R = realm.radius * 1.2;
+        for (let gx = realm.center.x - R; gx < realm.center.x + R; gx += 9) {
+            for (let gy = realm.center.y - R; gy < realm.center.y + R; gy += 9) {
+                const n = fbm(tex, gx / 60, gy / 60, 4);
+                if (n > 0.56) {
+                    ctx.globalAlpha = Math.min(0.5, (n - 0.56) * 2.4);
+                    ctx.fillStyle = style.groundLight;
+                } else if (n < 0.44) {
+                    ctx.globalAlpha = Math.min(0.5, (0.44 - n) * 2.4);
+                    ctx.fillStyle = style.groundDark;
+                } else continue;
+                ctx.beginPath();
+                ctx.arc(gx, gy, 7, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
         ctx.globalAlpha = 1;
         for (let i = 0; i < 1500; i++) {
@@ -640,6 +648,149 @@ function label(ctx: Ctx, text: string, x: number, y: number, size: number, color
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Game feel (juice) e câmera — skills `game-feel` e `camera-systems`
+// ───────────────────────────────────────────────────────────────────────────
+
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+/** Overshoot para o "pop" (passa de 1 e assenta). */
+const easeOutBack = (t: number) => {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+};
+
+/** Níveis de importância: feedback proporcional ao evento (nunca o mesmo para tudo). */
+const TIER = {
+    small: { trauma: 0, dur: 480 }, // chegada do Cartógrafo
+    medium: { trauma: 0.3, dur: 800 }, // baú coletado
+    large: { trauma: 0.55, dur: 1100 }, // território revelado
+} as const;
+
+const HERO_SPEED = 300; // px de mundo por segundo
+const CAM_RATE = 6.5; // seguimento exponencial: 1 - exp(-rate·dt), independente de FPS
+const DEADZONE = { x: 0.16, y: 0.14 }; // fração da área visível
+const LOOK_AHEAD = 55; // px de mundo à frente do movimento
+const SHAKE_MAX = { x: 9, y: 6 }; // px de tela
+const TRAUMA_DECAY = 1.5; // trauma perdido por segundo
+const POP_MS = 520;
+
+interface Fx {
+    kind: "dust" | "gold" | "reveal";
+    x: number;
+    y: number;
+    r: number;
+    t0: number;
+    dur: number;
+    seed: number;
+}
+
+interface HeroAnim {
+    from: Pt;
+    to: Pt;
+    t0: number;
+    dur: number;
+    onArrive: (() => void)[];
+}
+
+function drawFx(ctx: Ctx, f: Fx, now: number) {
+    const e = Math.min(1, (now - f.t0) / f.dur);
+    const r = rng(f.seed);
+    if (f.kind === "dust") {
+        for (let i = 0; i < 7; i++) {
+            const a = r() * Math.PI * 2;
+            const d = 4 + 14 * easeOutCubic(e) * (0.6 + r() * 0.6);
+            ctx.fillStyle = `rgba(214,190,150,${0.55 * (1 - e)})`;
+            ctx.beginPath();
+            ctx.arc(f.x + Math.cos(a) * d, f.y + Math.sin(a) * d * 0.45, 2.5 + 3 * e, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    } else if (f.kind === "gold") {
+        for (let i = 0; i < 14; i++) {
+            const a = -Math.PI / 2 + (r() - 0.5) * Math.PI * 1.2;
+            const v = 18 + r() * 26;
+            const x = f.x + Math.cos(a) * v * easeOutCubic(e);
+            const y = f.y - 8 + Math.sin(a) * v * easeOutCubic(e) + 22 * e * e;
+            ctx.fillStyle = `rgba(255,${200 + Math.floor(r() * 55)},90,${1 - e})`;
+            ctx.beginPath();
+            ctx.arc(x, y, 1.6 + r() * 1.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    } else {
+        const rad = f.r * (0.6 + 1.7 * easeOutCubic(e));
+        if (e < 0.35) {
+            const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 1.6);
+            g.addColorStop(0, `rgba(255,240,170,${0.6 * (1 - e / 0.35)})`);
+            g.addColorStop(1, "rgba(255,240,170,0)");
+            ctx.fillStyle = g;
+            ctx.fillRect(f.x - f.r * 1.6, f.y - f.r * 1.6, f.r * 3.2, f.r * 3.2);
+        }
+        ctx.strokeStyle = `rgba(255,226,122,${1 - e})`;
+        ctx.lineWidth = 3 * (1 - e) + 0.5;
+        ctx.beginPath();
+        ctx.ellipse(f.x, f.y, rad, rad * 0.55, 0, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+}
+
+interface TownData {
+    minutes: number;
+    inhabited: boolean;
+    verified: boolean;
+    lit: boolean;
+}
+
+/** Desenha uma cidade revelada; `pop` aplica squash & stretch no castelo. */
+function drawTown(ctx: Ctx, t: Territory, d: TownData, pop?: { sx: number; sy: number }) {
+    const place = PLACE_BY_ID[t.placeId];
+    const realm = REALM_BY_ID[t.realm];
+    const s = t.radius / 30;
+    ctx.fillStyle = "rgba(176,146,98,0.85)";
+    ctx.beginPath();
+    ctx.ellipse(t.center.x, t.center.y + 6 * s, t.radius * 0.95, t.radius * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(90,66,36,0.5)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    if (d.lit) {
+        const g = ctx.createRadialGradient(t.center.x, t.center.y - 8 * s, 0, t.center.x, t.center.y - 8 * s, t.radius * 1.4);
+        g.addColorStop(0, "rgba(255,214,110,0.45)");
+        g.addColorStop(1, "rgba(255,214,110,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(t.center.x - t.radius * 1.5, t.center.y - t.radius * 1.6, t.radius * 3, t.radius * 3);
+    }
+    const huts = place.population ?? 1;
+    for (let i = 0; i < huts; i++) {
+        const a = Math.PI * (0.12 + (0.76 * i) / Math.max(1, huts - 1)) + (huts === 1 ? Math.PI * 0.38 : 0);
+        drawHouse(ctx, t.center.x + Math.cos(a) * t.radius * 0.82, t.center.y + 6 * s + Math.sin(a) * t.radius * 0.42, s * 0.75);
+    }
+    const bx = t.center.x;
+    const by = t.center.y + 4 * s;
+    ctx.save();
+    if (pop) {
+        ctx.translate(bx, by);
+        ctx.scale(pop.sx, pop.sy);
+        ctx.translate(-bx, -by);
+    }
+    drawCastle(ctx, bx, by, s * 0.95, realm.color, d.inhabited ? "#d8342a" : realm.color, d.verified);
+    ctx.restore();
+}
+
+function usePrefersReducedMotion(): boolean {
+    const [rm, setRm] = useState(
+        () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
+    );
+    useEffect(() => {
+        const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+        if (!mq) return;
+        const on = () => setRm(mq.matches); // callback de evento (não síncrono no efeito)
+        mq.addEventListener("change", on);
+        return () => mq.removeEventListener("change", on);
+    }, []);
+    return rm;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Componente
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -658,25 +809,25 @@ interface Props {
     onMove: (dest: Pt) => MoveResult | null;
 }
 
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+
 interface Cam {
     x: number;
     y: number;
     zoom: number;
 }
 
-type Hover =
-    | { kind: "town"; t: Territory; x: number; y: number }
-    | { kind: "ruin"; t: Territory; x: number; y: number }
-    | { kind: "chest"; x: number; y: number }
-    | null;
+type HoverInfo = { kind: "town" | "ruin"; placeId: string } | { kind: "chest"; markId: string } | null;
+
+const SCENE_SCALE = 2;
+const MINI_W = 224;
+const MINI_H = 140;
 
 export function AdventureMap(props: Props) {
-    const { state, usage, discovered, world, rumors, justRevealed, selected, expedition, leagues, onSelect, onExpedition, onMove } = props;
+    const { discovered, rumors, expedition, leagues, onSelect, justRevealed } = props;
     const adv = useMemo(() => generateAdventure(), []);
     const marks = useMemo(() => generateMarks(), []);
-    const wrapRef = useRef<HTMLDivElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const miniRef = useRef<HTMLCanvasElement>(null);
+
     // Terreno estático: pintado uma única vez (componente só roda no cliente).
     const [terrain] = useState<HTMLCanvasElement | null>(() => {
         if (typeof document === "undefined") return null;
@@ -684,128 +835,135 @@ export function AdventureMap(props: Props) {
         renderTerrain(c, 2);
         return c;
     });
-    const terrainRef = useRef<HTMLCanvasElement | null>(terrain);
-    const terrainReady = Boolean(terrain);
-    const fogRef = useRef<HTMLCanvasElement | null>(null);
+
+    const wrapRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const miniRef = useRef<HTMLCanvasElement>(null);
+    const tooltipRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ w: 0, h: 0 });
-    const [cam, setCam] = useState<Cam | null>(null);
-    const [pointer, setPointer] = useState<Pt | null>(null);
-    const [screenPt, setScreenPt] = useState<{ x: number; y: number } | null>(null);
+    const [hoverInfo, setHoverInfo] = useState<HoverInfo>(null);
+    const prefersReduced = usePrefersReducedMotion();
+    const [reduceOverride, setReduceOverride] = useState<boolean | null>(() => {
+        try {
+            const v = window.localStorage.getItem("atlas:reduceMotion");
+            return v === null ? null : v === "1";
+        } catch {
+            return null;
+        }
+    });
+    const reduceMotion = reduceOverride ?? prefersReduced;
+
+    // ── Estado visual em refs (sem re-render do React a cada quadro) ──
+    const propsRef = useRef(props);
+    const sizeRef = useRef(size);
+    const reduceRef = useRef(reduceMotion);
+    const camRef = useRef<Cam | null>(null);
+    const camGoalRef = useRef<Cam | null>(null);
+    const followRef = useRef(false);
+    const pointerRef = useRef<Pt | null>(null);
+    const heroRef = useRef<Pt | null>(null); // posição DESENHADA do Cartógrafo
+    const heroAnimRef = useRef<HeroAnim | null>(null);
+    const arrivalQueueRef = useRef<(() => void)[]>([]);
+    const fogShownRef = useRef<string[] | null>(null); // névoa exibida (atualiza na chegada)
+    const pendingFogRef = useRef<string[] | null>(null);
+    const chestsShownRef = useRef<string[] | null>(null);
+    const pendingChestsRef = useRef<string[] | null>(null);
+    const traumaRef = useRef(0);
+    const fxRef = useRef<Fx[]>([]);
+    const popRef = useRef<Map<string, number>>(new Map());
+    const seenRevealRef = useRef<Set<string>>(new Set());
+    const sceneRef = useRef<HTMLCanvasElement | null>(null);
+    const fogCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const miniBaseRef = useRef<HTMLCanvasElement | null>(null);
+    const sceneDirtyRef = useRef(true);
+    const miniVersionRef = useRef(0);
+    // Reconstrução incremental: só o retângulo sujo (névoa nova, baú coletado, castelo que assentou)
+    const fullDirtyRef = useRef(true);
+    const dirtyRectRef = useRef<Rect | null>(null);
+    const miniKeyRef = useRef("");
+    const rafRef = useRef<number | null>(null);
+    const lastTRef = useRef(0);
+    const perfRef = useRef<number[] | null>(null);
     const drag = useRef<{ sx: number; sy: number; cx: number; cy: number; moved: boolean } | null>(null);
 
-    const minutes = useMemo(() => new Map(usage.map((u) => [u.placeId, u.weeklyMinutes])), [usage]);
-    const lifted = useMemo(() => new Set(expedition?.fog ?? []), [expedition?.fog]);
     const discoveredTowns = useMemo(() => adv.world.territories.filter((t) => discovered.has(t.placeId)), [adv, discovered]);
-    const isVisible = useCallback(
-        (p: Pt) =>
-            lifted.has(`${Math.floor(p.x / FOG_CELL)},${Math.floor(p.y / FOG_CELL)}`) ||
-            discoveredTowns.some((t) => Math.hypot(t.center.x - p.x, t.center.y - p.y) <= t.radius + 60),
-        [lifted, discoveredTowns],
-    );
 
-    // Névoa: recalculada quando a exploração muda.
-    useEffect(() => {
-        const c = fogRef.current ?? document.createElement("canvas");
-        renderFog(c, expedition?.fog ?? [], discoveredTowns);
-        fogRef.current = c;
-    }, [expedition?.fog, discoveredTowns]);
-
-    // Tamanho do canvas acompanha o contêiner.
-    useEffect(() => {
-        const el = wrapRef.current;
-        if (!el) return;
-        // O ResizeObserver já notifica o tamanho inicial ao começar a observar.
-        const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
-        ro.observe(el);
-        return () => ro.disconnect();
+    // ── Câmera ──
+    const clampCam = useCallback((c: Cam): Cam => {
+        const { w, h } = sizeRef.current;
+        if (!w) return c;
+        const fit = Math.max(w / WORLD_W, h / WORLD_H);
+        const zoom = Math.max(fit, Math.min(3.2, c.zoom));
+        const vw = w / zoom;
+        const vh = h / zoom;
+        return {
+            zoom,
+            x: Math.max(-120, Math.min(WORLD_W - vw + 120, c.x)),
+            y: Math.max(-80, Math.min(WORLD_H - vh + 80, c.y)),
+        };
     }, []);
 
-    const fitZoom = size.w ? Math.max(size.w / WORLD_W, size.h / WORLD_H) : 1;
-    const clampCam = useCallback(
-        (c: Cam): Cam => {
-            const zoom = Math.max(fitZoom, Math.min(3.2, c.zoom));
-            const vw = size.w / zoom;
-            const vh = size.h / zoom;
-            return {
-                zoom,
-                x: Math.max(-120, Math.min(WORLD_W - vw + 120, c.x)),
-                y: Math.max(-80, Math.min(WORLD_H - vh + 80, c.y)),
-            };
+    const camCentered = useCallback(
+        (p: Pt, zoom: number): Cam => {
+            const { w, h } = sizeRef.current;
+            return clampCam({ zoom, x: p.x - w / zoom / 2, y: p.y - h / zoom / 2 });
         },
-        [fitZoom, size],
+        [clampCam],
     );
 
-    const centerOn = useCallback(
-        (p: Pt, zoom?: number) => {
-            setCam((c) => {
-                const z = zoom ?? c?.zoom ?? fitZoom * 2;
-                return clampCam({ zoom: z, x: p.x - size.w / z / 2, y: p.y - size.h / z / 2 });
-            });
+    // ── Visibilidade pela névoa EXIBIDA ──
+    const visibleShown = useCallback(
+        (p: Pt) => {
+            const fog = fogShownRef.current ?? [];
+            const key = `${Math.floor(p.x / FOG_CELL)},${Math.floor(p.y / FOG_CELL)}`;
+            if (fog.includes(key)) return true;
+            const disc = propsRef.current.discovered;
+            return adv.world.territories.some(
+                (t) => disc.has(t.placeId) && Math.hypot(t.center.x - p.x, t.center.y - p.y) <= t.radius + 60,
+            );
         },
-        [clampCam, fitZoom, size],
+        [adv],
     );
 
-    // Câmera inicial: aproximada, centrada no Cartógrafo.
-    useEffect(() => {
-        // Espera o Cartógrafo existir para começar centrado nele.
-        if (!size.w || cam || !expedition) return;
-        const hero = expedition.cartographer;
-        const id = requestAnimationFrame(() => centerOn(hero, fitZoom * 2.1));
-        return () => cancelAnimationFrame(id);
-    }, [size, cam, expedition, centerOn, fitZoom]);
+    const townData = useCallback((t: Territory): TownData => {
+        const p = propsRef.current;
+        const min = p.usage.find((u) => u.placeId === t.placeId)?.weeklyMinutes ?? 0;
+        return {
+            minutes: min,
+            inhabited: min > 0 || Boolean(p.state.inhabit[t.placeId]),
+            verified: Boolean(p.state.discoveries[t.placeId]?.verified) || min > 0,
+            lit: Boolean(p.state.lanterns[t.placeId] || p.world[t.placeId]?.lanterns),
+        };
+    }, []);
 
-    const toWorld = useCallback(
-        (sx: number, sy: number): Pt => {
-            const c = cam ?? { x: 0, y: 0, zoom: 1 };
-            return { x: c.x + sx / c.zoom, y: c.y + sy / c.zoom };
-        },
-        [cam],
-    );
-
-    const hitTest = useCallback(
-        (p: Pt): Hover => {
-            for (const t of adv.world.territories) {
-                if (Math.hypot(t.center.x - p.x, t.center.y - p.y) > t.radius) continue;
-                if (discovered.has(t.placeId)) return { kind: "town", t, x: p.x, y: p.y };
-                if (isVisible(t.center)) return { kind: "ruin", t, x: p.x, y: p.y };
-            }
-            for (const m of marks) {
-                if (expedition?.marksCollected.includes(m.id)) continue;
-                if (Math.hypot(m.pos.x - p.x, m.pos.y - p.y) < 14 && isVisible(m.pos)) return { kind: "chest", x: p.x, y: p.y };
-            }
-            return null;
-        },
-        [adv, discovered, isVisible, marks, expedition],
-    );
-
-    const hover = useMemo(() => (pointer ? hitTest(pointer) : null), [pointer, hitTest]);
-    const reach = useMemo(() => {
-        if (!expedition || !leagues || !pointer || hover?.kind === "town") return null;
-        return reachTowards(expedition.cartographer, pointer, leagues.available, adv.world, discovered);
-    }, [expedition, leagues, pointer, hover, adv, discovered]);
-
-    // ── Renderização ──
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        const terrain = terrainRef.current;
-        if (!canvas || !terrain || !cam || !size.w) return;
-        const dpr = window.devicePixelRatio || 1;
-        if (canvas.width !== size.w * dpr || canvas.height !== size.h * dpr) {
-            canvas.width = size.w * dpr;
-            canvas.height = size.h * dpr;
+    // ── Camada estática (terreno + rotas + cidades + ruínas + baús + névoa) ──
+    const buildScene = useCallback(() => {
+        if (!terrain) return;
+        const tb = performance.now();
+        const p = propsRef.current;
+        const fog = fogShownRef.current ?? [];
+        const collected = chestsShownRef.current ?? [];
+        const fogC = fogCanvasRef.current ?? document.createElement("canvas");
+        renderFog(fogC, fog, adv.world.territories.filter((t) => p.discovered.has(t.placeId)));
+        fogCanvasRef.current = fogC;
+        const scene = sceneRef.current ?? document.createElement("canvas");
+        if (scene.width !== WORLD_W * SCENE_SCALE) {
+            scene.width = WORLD_W * SCENE_SCALE;
+            scene.height = WORLD_H * SCENE_SCALE;
         }
-        const ctx = canvas.getContext("2d")!;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = "#05060d";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const k = dpr * cam.zoom;
-        ctx.setTransform(k, 0, 0, k, -cam.x * k, -cam.y * k);
-        ctx.imageSmoothingQuality = "high";
+        const ctx = scene.getContext("2d")!;
+        ctx.setTransform(SCENE_SCALE, 0, 0, SCENE_SCALE, 0, 0);
+        const r = !fullDirtyRef.current && sceneRef.current ? dirtyRectRef.current : null;
+        ctx.save();
+        if (r) {
+            // medido: reconstrução total ≈ 45 ms (tarefa longa na chegada); só a região suja custa uma fração
+            ctx.beginPath();
+            ctx.rect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+            ctx.clip();
+        }
         ctx.drawImage(terrain, 0, 0, WORLD_W, WORLD_H);
-
-        // rotas de migração planejadas
-        for (const [from, d] of Object.entries(state.decisions)) {
-            if (!d.target || !discovered.has(from) || !discovered.has(d.target)) continue;
+        for (const [from, d] of Object.entries(p.state.decisions)) {
+            if (!d.target || !p.discovered.has(from) || !p.discovered.has(d.target)) continue;
             const a = adv.world.territories.find((t) => t.placeId === from);
             const b = adv.world.territories.find((t) => t.placeId === d.target);
             if (!a || !b) continue;
@@ -818,248 +976,692 @@ export function AdventureMap(props: Props) {
             ctx.stroke();
             ctx.setLineDash([]);
         }
-
-        // cidades e ruínas (ordem por y)
         const towns = [...adv.world.territories].sort((a, b) => a.center.y - b.center.y);
         for (const t of towns) {
-            const place = PLACE_BY_ID[t.placeId];
-            const realm = REALM_BY_ID[t.realm];
             const s = t.radius / 30;
-            if (!discovered.has(t.placeId)) {
-                if (isVisible(t.center)) drawRuin(ctx, t.center.x, t.center.y + 6 * s, Math.max(0.7, s), Boolean(rumors[t.placeId]));
+            if (!p.discovered.has(t.placeId)) {
+                if (visibleShown(t.center)) drawRuin(ctx, t.center.x, t.center.y + 6 * s, Math.max(0.7, s), Boolean(p.rumors[t.placeId]));
                 continue;
             }
-            const min = minutes.get(t.placeId) ?? 0;
-            const inhabited = min > 0 || Boolean(state.inhabit[t.placeId]);
-            const verified = Boolean(state.discoveries[t.placeId]?.verified) || min > 0;
-            const isSel = selected === t.placeId || (hover?.kind === "town" && hover.t.placeId === t.placeId);
-            // praça
-            ctx.fillStyle = "rgba(176,146,98,0.85)";
-            ctx.beginPath();
-            ctx.ellipse(t.center.x, t.center.y + 6 * s, t.radius * 0.95, t.radius * 0.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = "rgba(90,66,36,0.5)";
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            if (state.lanterns[t.placeId] || world[t.placeId]?.lanterns) {
-                const g = ctx.createRadialGradient(t.center.x, t.center.y - 8 * s, 0, t.center.x, t.center.y - 8 * s, t.radius * 1.4);
-                g.addColorStop(0, "rgba(255,214,110,0.45)");
-                g.addColorStop(1, "rgba(255,214,110,0)");
-                ctx.fillStyle = g;
-                ctx.fillRect(t.center.x - t.radius * 1.5, t.center.y - t.radius * 1.6, t.radius * 3, t.radius * 3);
+            if (popRef.current.has(t.placeId)) continue; // desenhada no overlay enquanto "pula"
+            drawTown(ctx, t, townData(t));
+        }
+        for (const m of marks) if (!collected.includes(m.id)) drawChest(ctx, m.pos.x, m.pos.y);
+        ctx.drawImage(fogC, 0, 0, WORLD_W, WORLD_H);
+        ctx.restore();
+        sceneRef.current = scene;
+        // minimapa base em cache (só hero e retângulo de visão mudam por quadro)
+        const mb = miniBaseRef.current ?? document.createElement("canvas");
+        mb.width = MINI_W * 2;
+        mb.height = MINI_H * 2;
+        const mctx = mb.getContext("2d")!;
+        mctx.setTransform(2, 0, 0, 2, 0, 0);
+        mctx.drawImage(scene, 0, 0, MINI_W, MINI_H);
+        const sx = MINI_W / WORLD_W;
+        for (const t of adv.world.territories) {
+            if (!p.discovered.has(t.placeId)) continue;
+            mctx.fillStyle = REALM_BY_ID[t.realm].color;
+            mctx.fillRect(t.center.x * sx - 2.5, t.center.y * sx - 2.5, 5, 5);
+            mctx.strokeStyle = "#fff";
+            mctx.lineWidth = 0.8;
+            mctx.strokeRect(t.center.x * sx - 2.5, t.center.y * sx - 2.5, 5, 5);
+        }
+        miniBaseRef.current = mb;
+        miniVersionRef.current++;
+        sceneDirtyRef.current = false;
+        fullDirtyRef.current = false;
+        dirtyRectRef.current = null;
+        const bw = window as unknown as { __atlasBuild?: number[] };
+        if (perfRef.current) (bw.__atlasBuild ??= []).push(performance.now() - tb);
+    }, [terrain, adv, marks, visibleShown, townData]);
+
+    const addFx = useCallback((kind: Fx["kind"], x: number, y: number, r: number, dur: number) => {
+        fxRef.current.push({ kind, x, y, r, t0: performance.now(), dur, seed: Math.floor(Math.random() * 1e9) });
+    }, []);
+    const addTrauma = useCallback((amount: number) => {
+        if (reduceRef.current) return; // acessibilidade: sem tremor
+        traumaRef.current = Math.min(1, traumaRef.current + amount);
+    }, []);
+
+    const markFull = useCallback(() => {
+        fullDirtyRef.current = true;
+        dirtyRectRef.current = null;
+        sceneDirtyRef.current = true;
+    }, []);
+    const markRect = useCallback((r: Rect) => {
+        sceneDirtyRef.current = true;
+        if (fullDirtyRef.current) return;
+        const d = dirtyRectRef.current;
+        dirtyRectRef.current = d
+            ? { x0: Math.min(d.x0, r.x0), y0: Math.min(d.y0, r.y0), x1: Math.max(d.x1, r.x1), y1: Math.max(d.y1, r.y1) }
+            : r;
+    }, []);
+
+    // ── Desenho de um quadro ──
+    const draw = useCallback(
+        (now: number, shake: { x: number; y: number }) => {
+            const canvas = canvasRef.current;
+            const cam = camRef.current;
+            const { w, h } = sizeRef.current;
+            if (!canvas || !cam || !w) return;
+            if (sceneDirtyRef.current) buildScene();
+            const scene = sceneRef.current;
+            if (!scene) return;
+            const p = propsRef.current;
+            const dpr = window.devicePixelRatio || 1;
+            if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+                canvas.width = Math.round(w * dpr);
+                canvas.height = Math.round(h * dpr);
             }
-            if (justRevealed.includes(t.placeId) || isSel) {
-                ctx.strokeStyle = justRevealed.includes(t.placeId) ? "rgba(255,240,150,0.95)" : "rgba(255,226,122,0.9)";
+            const ctx = canvas.getContext("2d")!;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#05060d";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const k = dpr * cam.zoom;
+            // tremor como deslocamento SOMADO à câmera (nunca move o Cartógrafo)
+            ctx.setTransform(k, 0, 0, k, -cam.x * k + shake.x * dpr, -cam.y * k + shake.y * dpr);
+            // LOD de reamostragem: o bilinear ("low") lê 2 texels por eixo, então com redução
+            // até 2:1 (ratio ≥ 0,5) nenhum texel é pulado e não há serrilhado; abaixo disso os
+            // mipmaps ("high") são necessários. Medido: 3,1 ms/quadro contra 5,1 ms
+            // (build de produção; "medium" mediu pior que ambos e foi descartado).
+            const ratio = k / SCENE_SCALE;
+            ctx.imageSmoothingQuality = ratio >= 0.5 ? "low" : "high";
+            ctx.drawImage(scene, 0, 0, WORLD_W, WORLD_H);
+
+            // cidades em "pop" (squash & stretch com overshoot)
+            for (const [id, t0] of popRef.current) {
+                const t = adv.world.territories.find((x) => x.placeId === id);
+                if (!t) continue;
+                const e = Math.min(1, (now - t0) / POP_MS);
+                const v = easeOutBack(e);
+                drawTown(ctx, t, townData(t), { sx: 1.4 - 0.4 * v, sy: 0.6 + 0.4 * v });
+            }
+
+            // anel de seleção / foco
+            const ring = (id: string, color: string) => {
+                const t = adv.world.territories.find((x) => x.placeId === id);
+                if (!t) return;
+                const s = t.radius / 30;
+                ctx.strokeStyle = color;
                 ctx.lineWidth = 2.5;
                 ctx.beginPath();
                 ctx.ellipse(t.center.x, t.center.y + 6 * s, t.radius * 1.05, t.radius * 0.58, 0, 0, Math.PI * 2);
                 ctx.stroke();
+            };
+            if (p.selected && p.discovered.has(p.selected)) ring(p.selected, "rgba(255,226,122,0.95)");
+
+            for (const f of fxRef.current) drawFx(ctx, f, now);
+
+            // rota sob o cursor (setas verdes = alcança hoje; vermelhas = além)
+            const ptr = pointerRef.current;
+            const exp = p.expedition;
+            const hero = heroRef.current;
+            if (exp && hero && ptr && p.leagues && !heroAnimRef.current && !drag.current?.moved) {
+                const total = Math.hypot(ptr.x - hero.x, ptr.y - hero.y);
+                if (total >= 18) drawRoute(total);
             }
-            // casas: uma por ordem de grandeza de população
-            const huts = place.population ?? 1;
-            for (let i = 0; i < huts; i++) {
-                const a = Math.PI * (0.12 + (0.76 * i) / Math.max(1, huts - 1)) + (huts === 1 ? Math.PI * 0.38 : 0);
-                drawHouse(ctx, t.center.x + Math.cos(a) * t.radius * 0.82, t.center.y + 6 * s + Math.sin(a) * t.radius * 0.42, s * 0.75);
+            function drawRoute(total: number) {
+                if (!exp || !hero || !ptr || !p.leagues || !cam) return;
+                const reach = reachTowards(exp.cartographer, ptr, p.leagues.available, adv.world, p.discovered);
+                const reachLen = Math.hypot(reach.point.x - hero.x, reach.point.y - hero.y);
+                const ang = Math.atan2(ptr.y - hero.y, ptr.x - hero.x);
+                for (let d = 16; d < total; d += 16) {
+                    ctx.save();
+                    ctx.translate(hero.x + Math.cos(ang) * d, hero.y + Math.sin(ang) * d);
+                    ctx.rotate(ang);
+                    ctx.fillStyle = d <= reachLen ? "#46d65a" : "#e24a3b";
+                    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+                    ctx.lineWidth = 0.8;
+                    ctx.beginPath();
+                    ctx.moveTo(4, 0);
+                    ctx.lineTo(-3, -3.5);
+                    ctx.lineTo(-1, 0);
+                    ctx.lineTo(-3, 3.5);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                const lsx = (reach.point.x - cam.x) * cam.zoom;
+                const lsy = (reach.point.y - cam.y) * cam.zoom;
+                ctx.setTransform(dpr, 0, 0, dpr, shake.x * dpr, shake.y * dpr);
+                label(ctx, `${Math.ceil(reach.cost)} léguas`, lsx, lsy - 14, 13, reach.truncated ? "#ffb3a8" : "#c8ffcf");
+                ctx.setTransform(k, 0, 0, k, -cam.x * k + shake.x * dpr, -cam.y * k + shake.y * dpr);
             }
-            drawCastle(ctx, t.center.x, t.center.y + 4 * s, s * 0.95, realm.color, inhabited ? "#d8342a" : realm.color, verified);
-            label(ctx, place.name, t.center.x, t.center.y + t.radius * 0.62 + 14, 11, "#fff8e6");
-            label(ctx, epithet(place), t.center.x, t.center.y + t.radius * 0.62 + 26, 9, "#e8d9b0", true);
-        }
 
-        // baús (marcos)
-        for (const m of marks) {
-            if (expedition?.marksCollected.includes(m.id)) continue;
-            drawChest(ctx, m.pos.x, m.pos.y);
-        }
+            if (hero) drawHero(ctx, hero.x, hero.y);
 
-        // névoa preta estrelada
-        if (fogRef.current) ctx.drawImage(fogRef.current, 0, 0, WORLD_W, WORLD_H);
-
-        // rota sob o cursor (setas verdes = alcança hoje; vermelhas = além)
-        if (expedition && reach && pointer) {
-            const from = expedition.cartographer;
-            const total = Math.hypot(pointer.x - from.x, pointer.y - from.y);
-            const reachLen = Math.hypot(reach.point.x - from.x, reach.point.y - from.y);
-            const ang = Math.atan2(pointer.y - from.y, pointer.x - from.x);
-            for (let d = 16; d < total; d += 16) {
-                const px = from.x + Math.cos(ang) * d;
-                const py = from.y + Math.sin(ang) * d;
-                ctx.save();
-                ctx.translate(px, py);
-                ctx.rotate(ang);
-                ctx.fillStyle = d <= reachLen ? "#46d65a" : "#e24a3b";
-                ctx.strokeStyle = "rgba(0,0,0,0.6)";
-                ctx.lineWidth = 0.8;
-                ctx.beginPath();
-                ctx.moveTo(4, 0);
-                ctx.lineTo(-3, -3.5);
-                ctx.lineTo(-1, 0);
-                ctx.lineTo(-3, 3.5);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-                ctx.restore();
+            // ── Rótulos em espaço de TELA: tamanho legível fixo + sem sobreposição (game-ui-ux) ──
+            ctx.setTransform(dpr, 0, 0, dpr, shake.x * dpr, shake.y * dpr);
+            const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+            const fits = (x0: number, y0: number, x1: number, y1: number) => {
+                if (placed.some((r) => !(x1 < r.x0 || x0 > r.x1 || y1 < r.y0 || y0 > r.y1))) return false;
+                placed.push({ x0, y0, x1, y1 });
+                return true;
+            };
+            const prio = (t: Territory) => {
+                const d = townData(t);
+                return (t.placeId === p.selected ? 1000 : 0) + (d.inhabited ? 100 : 0) + (d.verified ? 10 : 0) + contentVolumeOf(PLACE_BY_ID[t.placeId]);
+            };
+            const towns = adv.world.territories.filter((t) => p.discovered.has(t.placeId)).sort((a, b) => prio(b) - prio(a));
+            ctx.font = "bold 14px Inter, system-ui, sans-serif";
+            for (const t of towns) {
+                const sx = (t.center.x - cam.x) * cam.zoom;
+                const sy = (t.center.y + t.radius * 0.62 - cam.y) * cam.zoom + 16;
+                if (sx < -80 || sx > w + 80 || sy < -20 || sy > h + 30) continue;
+                const place = PLACE_BY_ID[t.placeId];
+                ctx.font = "bold 14px Inter, system-ui, sans-serif";
+                const nw = ctx.measureText(place.name).width;
+                if (!fits(sx - nw / 2 - 3, sy - 13, sx + nw / 2 + 3, sy + 4)) continue;
+                label(ctx, place.name, sx, sy, 14, "#fff8e6");
+                // nível de detalhe: epíteto só quando a cidade aparece grande o bastante
+                if (t.radius * cam.zoom >= 26) {
+                    const ep = epithet(place);
+                    ctx.font = "italic 12px Inter, system-ui, sans-serif";
+                    const ew = ctx.measureText(ep).width;
+                    if (fits(sx - ew / 2 - 3, sy + 3, sx + ew / 2 + 3, sy + 17)) label(ctx, ep, sx, sy + 15, 12, "#ecdcb2", true);
+                }
             }
-            label(ctx, `${Math.ceil(reach.cost)} léguas`, reach.point.x, reach.point.y - 12, 11, reach.truncated ? "#ffb3a8" : "#c8ffcf");
-        }
 
-        if (expedition) drawHero(ctx, expedition.cartographer.x, expedition.cartographer.y);
-    }, [cam, size, terrainReady, adv, marks, state, discovered, minutes, rumors, world, justRevealed, selected, hover, expedition, reach, pointer, isVisible, lifted]);
+            // ── Minimapa ──
+            // redesenha só quando câmera, Cartógrafo ou base mudam (cada canvas invalidado custa raster/composição)
+            const mini = miniRef.current;
+            const mb = miniBaseRef.current;
+            const miniKey = `${cam.x.toFixed(1)},${cam.y.toFixed(1)},${cam.zoom.toFixed(3)},${hero ? `${hero.x.toFixed(1)},${hero.y.toFixed(1)}` : ""},${w}x${h},${miniVersionRef.current}`;
+            if (mini && mb && miniKey !== miniKeyRef.current) {
+                miniKeyRef.current = miniKey;
+                if (mini.width !== MINI_W * 2) {
+                    mini.width = MINI_W * 2;
+                    mini.height = MINI_H * 2;
+                }
+                const mctx = mini.getContext("2d")!;
+                mctx.setTransform(1, 0, 0, 1, 0, 0);
+                mctx.drawImage(mb, 0, 0);
+                mctx.setTransform(2, 0, 0, 2, 0, 0);
+                const s = MINI_W / WORLD_W;
+                if (hero) blob(mctx, hero.x * s, hero.y * s, 2.6, "#ff4b3e");
+                mctx.strokeStyle = "#ffe9a8";
+                mctx.lineWidth = 1;
+                mctx.strokeRect(cam.x * s, cam.y * s, (w / cam.zoom) * s, (h / cam.zoom) * s);
+            }
+        },
+        [adv, buildScene, townData],
+    );
 
-    // ── Minimapa ──
+    // ── Loop de animação sob demanda (para quando tudo está em repouso) ──
+    const frameRef = useRef<(t: number) => void>(() => {});
+    const requestRender = useCallback(() => {
+        if (rafRef.current !== null) return;
+        rafRef.current = requestAnimationFrame((t) => frameRef.current(t));
+    }, []);
+
     useEffect(() => {
-        const mini = miniRef.current;
-        const terrain = terrainRef.current;
-        if (!mini || !terrain || !cam) return;
-        const W = 224;
-        const H = 140;
-        mini.width = W * 2;
-        mini.height = H * 2;
-        const ctx = mini.getContext("2d")!;
-        ctx.setTransform(2, 0, 0, 2, 0, 0);
-        ctx.drawImage(terrain, 0, 0, W, H);
-        if (fogRef.current) ctx.drawImage(fogRef.current, 0, 0, W, H);
-        const sx = W / WORLD_W;
-        for (const t of discoveredTowns) {
-            ctx.fillStyle = REALM_BY_ID[t.realm].color;
-            ctx.fillRect(t.center.x * sx - 2.5, t.center.y * sx - 2.5, 5, 5);
-            ctx.strokeStyle = "#fff";
-            ctx.lineWidth = 0.8;
-            ctx.strokeRect(t.center.x * sx - 2.5, t.center.y * sx - 2.5, 5, 5);
+        frameRef.current = (now: number) => {
+            rafRef.current = null;
+            const dt = Math.min(0.05, lastTRef.current ? (now - lastTRef.current) / 1000 : 0.016);
+            lastTRef.current = now;
+            const { w, h } = sizeRef.current;
+            let cam = camRef.current;
+
+            // Cartógrafo: interpolação com easing (a lógica já mudou; o desenho alcança)
+            const anim = heroAnimRef.current;
+            let lead = { x: 0, y: 0 };
+            if (anim) {
+                const e = anim.dur <= 0 ? 1 : Math.min(1, (now - anim.t0) / anim.dur);
+                const v = easeInOutCubic(e);
+                heroRef.current = { x: anim.from.x + (anim.to.x - anim.from.x) * v, y: anim.from.y + (anim.to.y - anim.from.y) * v };
+                const len = Math.hypot(anim.to.x - anim.from.x, anim.to.y - anim.from.y) || 1;
+                const ahead = LOOK_AHEAD * Math.sin(Math.PI * e); // antecipação entra e sai suave
+                lead = { x: ((anim.to.x - anim.from.x) / len) * ahead, y: ((anim.to.y - anim.from.y) / len) * ahead };
+                if (e >= 1) {
+                    heroAnimRef.current = null;
+                    heroRef.current = anim.to;
+                    // o mundo se revela na CHEGADA
+                    if (pendingFogRef.current) {
+                        const before = new Set(fogShownRef.current ?? []);
+                        const M = 100; // furo da névoa (~50) + ruína que passa a aparecer
+                        for (const key of pendingFogRef.current) {
+                            if (before.has(key)) continue;
+                            const [cx, cy] = key.split(",").map(Number);
+                            markRect({ x0: cx * FOG_CELL - M, y0: cy * FOG_CELL - M, x1: (cx + 1) * FOG_CELL + M, y1: (cy + 1) * FOG_CELL + M });
+                        }
+                        fogShownRef.current = pendingFogRef.current;
+                        pendingFogRef.current = null;
+                    }
+                    if (pendingChestsRef.current) {
+                        const before = new Set(chestsShownRef.current ?? []);
+                        for (const id of pendingChestsRef.current) {
+                            const m = before.has(id) ? null : marks.find((x) => x.id === id);
+                            if (m) markRect({ x0: m.pos.x - 24, y0: m.pos.y - 24, x1: m.pos.x + 24, y1: m.pos.y + 24 });
+                        }
+                        chestsShownRef.current = pendingChestsRef.current;
+                        pendingChestsRef.current = null;
+                    }
+                    if (!reduceRef.current) addFx("dust", anim.to.x, anim.to.y, 0, TIER.small.dur);
+                    for (const fn of anim.onArrive) fn();
+                }
+            }
+
+            // Câmera: zona morta + antecipação + suavização exponencial (independente de FPS)
+            if (cam && w) {
+                const t = 1 - Math.exp(-CAM_RATE * dt);
+                const goal = camGoalRef.current;
+                if (goal) {
+                    const z = Math.exp(Math.log(cam.zoom) + (Math.log(goal.zoom) - Math.log(cam.zoom)) * t);
+                    cam = clampCam({ zoom: z, x: cam.x + (goal.x - cam.x) * t, y: cam.y + (goal.y - cam.y) * t });
+                    if (Math.abs(goal.x - cam.x) < 0.5 && Math.abs(goal.y - cam.y) < 0.5 && Math.abs(goal.zoom - cam.zoom) < 0.002) {
+                        cam = goal;
+                        camGoalRef.current = null;
+                    }
+                } else if (followRef.current && heroRef.current) {
+                    const vw = w / cam.zoom;
+                    const vh = h / cam.zoom;
+                    const cx = cam.x + vw / 2;
+                    const cy = cam.y + vh / 2;
+                    const tx = heroRef.current.x + lead.x;
+                    const ty = heroRef.current.y + lead.y;
+                    const dzx = vw * DEADZONE.x;
+                    const dzy = vh * DEADZONE.y;
+                    const ox = tx - cx;
+                    const oy = ty - cy;
+                    const gx = Math.abs(ox) > dzx ? cx + (ox - Math.sign(ox) * dzx) : cx;
+                    const gy = Math.abs(oy) > dzy ? cy + (oy - Math.sign(oy) * dzy) : cy;
+                    cam = clampCam({ zoom: cam.zoom, x: cam.x + (gx - cx) * t, y: cam.y + (gy - cy) * t });
+                    if (!heroAnimRef.current && Math.abs(gx - cx) < 0.5 && Math.abs(gy - cy) < 0.5) followRef.current = false;
+                }
+                camRef.current = cam;
+            }
+
+            // Tremor por trauma² com ruído senoidal suave e decaimento
+            traumaRef.current = Math.max(0, traumaRef.current - TRAUMA_DECAY * dt);
+            const sh = traumaRef.current * traumaRef.current;
+            const shake = sh > 0 ? { x: SHAKE_MAX.x * sh * Math.sin(now / 1000 * 31), y: SHAKE_MAX.y * sh * Math.sin(now / 1000 * 43 + 1.3) } : { x: 0, y: 0 };
+
+            // efeitos e pops expirados
+            fxRef.current = fxRef.current.filter((f) => now - f.t0 < f.dur);
+            for (const [id, t0] of popRef.current) {
+                if (now - t0 >= POP_MS) {
+                    popRef.current.delete(id);
+                    const t = adv.world.territories.find((x) => x.placeId === id);
+                    if (t) markRect({ x0: t.center.x - t.radius * 1.7, y0: t.center.y - t.radius * 1.9, x1: t.center.x + t.radius * 1.7, y1: t.center.y + t.radius * 1.4 });
+                    else markFull();
+                }
+            }
+
+            const t0 = performance.now();
+            draw(now, shake);
+            if (perfRef.current) {
+                perfRef.current.push(performance.now() - t0);
+                if (perfRef.current.length > 600) perfRef.current.shift();
+            }
+
+            const animating =
+                heroAnimRef.current || followRef.current || camGoalRef.current || traumaRef.current > 0 || fxRef.current.length || popRef.current.size;
+            if (animating) requestRender();
+            else lastTRef.current = 0;
+        };
+    });
+
+    // ── Sincronização com os dados ──
+    useEffect(() => {
+        propsRef.current = props;
+        requestRender();
+    });
+    useEffect(() => {
+        sizeRef.current = size;
+        reduceRef.current = reduceMotion;
+        requestRender();
+    }, [size, reduceMotion, requestRender]);
+
+    // Medidor opcional de custo por quadro (localStorage "atlas:perf" = "1").
+    useEffect(() => {
+        try {
+            if (window.localStorage.getItem("atlas:perf") === "1") {
+                perfRef.current = [];
+                (window as unknown as { __atlasPerf?: number[] }).__atlasPerf = perfRef.current;
+            }
+        } catch {
+            /* storage indisponível */
         }
-        if (expedition) blob(ctx, expedition.cartographer.x * sx, expedition.cartographer.y * sx, 2.6, "#ff4b3e");
-        ctx.strokeStyle = "#ffe9a8";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(cam.x * sx, cam.y * sx, (size.w / cam.zoom) * sx, (size.h / cam.zoom) * sx);
-    }, [cam, size, terrainReady, discoveredTowns, expedition, lifted]);
+    }, []);
+
+    // Só os campos que mudam a camada estática (mover o Cartógrafo NÃO reconstrói tudo)
+    const { decisions, inhabit, discoveries, lanterns } = props.state;
+    // `discovered`/`usage` são recriados a cada mudança de estado (inclusive um passo do
+    // Cartógrafo): a dependência é o CONTEÚDO, para não reconstruir a cena à toa (medido: 45 ms).
+    const discoveredKey = useMemo(() => [...discovered].sort().join(","), [discovered]);
+    const usageKey = useMemo(() => props.usage.map((u) => `${u.placeId}:${u.weeklyMinutes}`).join(","), [props.usage]);
+    useEffect(() => {
+        markFull();
+        requestRender();
+    }, [decisions, inhabit, discoveries, lanterns, discoveredKey, usageKey, props.world, rumors, markFull, requestRender]);
+
+    // Cartógrafo: anima até a nova posição lógica; névoa/baús se revelam na chegada
+    useEffect(() => {
+        if (!expedition) return;
+        const to = expedition.cartographer;
+        if (!heroRef.current) {
+            heroRef.current = to;
+            fogShownRef.current = expedition.fog;
+            chestsShownRef.current = expedition.marksCollected;
+        } else if (heroRef.current.x !== to.x || heroRef.current.y !== to.y) {
+            const from = heroRef.current;
+            const dist = Math.hypot(to.x - from.x, to.y - from.y);
+            const dur = reduceRef.current ? 0 : Math.max(220, Math.min(1500, (dist / HERO_SPEED) * 1000));
+            heroAnimRef.current = { from, to, t0: performance.now(), dur, onArrive: arrivalQueueRef.current };
+            arrivalQueueRef.current = [];
+            followRef.current = true;
+            camGoalRef.current = null;
+            pendingFogRef.current = expedition.fog;
+            pendingChestsRef.current = expedition.marksCollected;
+            requestRender(); // a cena só muda na chegada
+            return;
+        } else {
+            // sem movimento (ex.: carregou do servidor): aplica direto
+            fogShownRef.current = expedition.fog;
+            chestsShownRef.current = expedition.marksCollected;
+        }
+        markFull();
+        requestRender();
+    }, [expedition, markFull, requestRender]);
+
+    // Câmera inicial centrada no Cartógrafo (ref, sem setState)
+    useEffect(() => {
+        if (!size.w || camRef.current || !expedition) return;
+        const fit = Math.max(size.w / WORLD_W, size.h / WORLD_H);
+        camRef.current = camCentered(heroRef.current ?? expedition.cartographer, fit * 2.1);
+        requestRender();
+    }, [size, expedition, camCentered, requestRender]);
+
+    // Revelação: o maior feedback (pop do castelo + anel de luz + tremor + foco)
+    useEffect(() => {
+        const fresh = justRevealed.filter((id) => !seenRevealRef.current.has(id));
+        if (!fresh.length) return;
+        const now = performance.now();
+        for (const id of fresh) {
+            seenRevealRef.current.add(id);
+            const t = adv.world.territories.find((x) => x.placeId === id);
+            if (!t) continue;
+            if (!reduceRef.current) popRef.current.set(id, now);
+            addFx("reveal", t.center.x, t.center.y + 4, t.radius, TIER.large.dur);
+            addTrauma(TIER.large.trauma);
+            const cam = camRef.current;
+            if (cam) camGoalRef.current = camCentered(t.center, Math.max(cam.zoom, 1.6));
+        }
+        markFull();
+        requestRender();
+    }, [justRevealed, adv, addFx, addTrauma, camCentered, markFull, requestRender]);
+
+    // Tamanho do canvas acompanha o contêiner (notificação inicial inclusa).
+    useEffect(() => {
+        const el = wrapRef.current;
+        if (!el) return;
+        const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    // Limpeza do loop ao desmontar
+    useEffect(
+        () => () => {
+            if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+        },
+        [],
+    );
 
     // ── Interação ──
+    const toWorld = (sx: number, sy: number): Pt => {
+        const c = camRef.current ?? { x: 0, y: 0, zoom: 1 };
+        return { x: c.x + sx / c.zoom, y: c.y + sy / c.zoom };
+    };
+
+    const hitTest = (pt: Pt): HoverInfo => {
+        const p = propsRef.current;
+        for (const t of adv.world.territories) {
+            if (Math.hypot(t.center.x - pt.x, t.center.y - pt.y) > t.radius) continue;
+            if (p.discovered.has(t.placeId)) return { kind: "town", placeId: t.placeId };
+            if (visibleShown(t.center)) return { kind: "ruin", placeId: t.placeId };
+        }
+        const collected = chestsShownRef.current ?? [];
+        for (const m of marks) {
+            if (collected.includes(m.id)) continue;
+            if (Math.hypot(m.pos.x - pt.x, m.pos.y - pt.y) < 14 && visibleShown(m.pos)) return { kind: "chest", markId: m.id };
+        }
+        return null;
+    };
+
+    const sameHover = (a: HoverInfo, b: HoverInfo) =>
+        a === b ||
+        (!!a && !!b && a.kind === b.kind && ("placeId" in a ? a.placeId : a.markId) === ("placeId" in b ? b.placeId : b.markId));
+
     const onPointerDown = (e: React.PointerEvent) => {
+        const cam = camRef.current;
         if (!cam) return;
         (e.target as Element).setPointerCapture?.(e.pointerId);
         drag.current = { sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, moved: false };
     };
     const onPointerMove = (e: React.PointerEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
+        const cam = camRef.current;
         if (!rect || !cam) return;
         const d = drag.current;
         if (d) {
             const dx = e.clientX - d.sx;
             const dy = e.clientY - d.sy;
             if (Math.abs(dx) + Math.abs(dy) > 5) d.moved = true;
-            if (d.moved) setCam(clampCam({ zoom: cam.zoom, x: d.cx - dx / cam.zoom, y: d.cy - dy / cam.zoom }));
+            if (d.moved) {
+                followRef.current = false;
+                camGoalRef.current = null;
+                camRef.current = clampCam({ zoom: cam.zoom, x: d.cx - dx / cam.zoom, y: d.cy - dy / cam.zoom });
+                requestRender();
+            }
             return;
         }
-        setScreenPt({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-        setPointer(toWorld(e.clientX - rect.left, e.clientY - rect.top));
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        pointerRef.current = toWorld(sx, sy);
+        const hit = hitTest(pointerRef.current);
+        setHoverInfo((prev) => (sameHover(prev, hit) ? prev : hit)); // re-render só quando o alvo muda
+        const tip = tooltipRef.current;
+        if (tip) tip.style.transform = `translate(${Math.min(sx + 14, sizeRef.current.w - 250)}px, ${Math.max(8, sy - 10)}px)`;
+        requestRender();
     };
     const onPointerUp = (e: React.PointerEvent) => {
         const d = drag.current;
         drag.current = null;
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!d || d.moved || !rect) return;
-        const p = toWorld(e.clientX - rect.left, e.clientY - rect.top);
-        const hit = hitTest(p);
+        const pt = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const hit = hitTest(pt);
+        const p = propsRef.current;
         if (hit?.kind === "town") {
-            onSelect(hit.t.placeId);
+            p.onSelect(hit.placeId);
             return;
         }
-        const res = onMove(p);
-        if (res?.moved && !res.truncated && hit?.kind === "ruin") onExpedition(hit.t.placeId);
-        if (res?.moved && cam) {
-            const hp = res.exp.cartographer;
-            const vw = size.w / cam.zoom;
-            const vh = size.h / cam.zoom;
-            if (hp.x < cam.x + vw * 0.15 || hp.x > cam.x + vw * 0.85 || hp.y < cam.y + vh * 0.15 || hp.y > cam.y + vh * 0.85) centerOn(hp);
+        // eventos de chegada (disparados quando o Cartógrafo realmente chega)
+        const queue: (() => void)[] = [];
+        const res = p.onMove(pt);
+        if (!res?.moved) return;
+        for (const y of res.collected) {
+            const m = marks.find((x) => x.id === y.markId);
+            if (m)
+                queue.push(() => {
+                    addFx("gold", m.pos.x, m.pos.y, 0, TIER.medium.dur);
+                    addTrauma(TIER.medium.trauma);
+                });
         }
+        if (!res.truncated && hit?.kind === "ruin") {
+            const id = hit.placeId;
+            queue.push(() => p.onExpedition(id));
+        }
+        arrivalQueueRef.current = queue;
     };
     const onWheel = (e: React.WheelEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
+        const cam = camRef.current;
         if (!rect || !cam) return;
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
         const before = toWorld(sx, sy);
         const zoom = cam.zoom * (e.deltaY > 0 ? 1 / 1.15 : 1.15);
-        setCam(clampCam({ zoom, x: before.x - sx / zoom, y: before.y - sy / zoom }));
+        followRef.current = false;
+        camGoalRef.current = null;
+        camRef.current = clampCam({ zoom, x: before.x - sx / zoom, y: before.y - sy / zoom });
+        requestRender();
     };
     const zoomBy = (f: number) => {
+        const cam = camGoalRef.current ?? camRef.current;
         if (!cam) return;
-        const cx = cam.x + size.w / cam.zoom / 2;
-        const cy = cam.y + size.h / cam.zoom / 2;
-        const zoom = cam.zoom * f;
-        setCam(clampCam({ zoom, x: cx - size.w / zoom / 2, y: cy - size.h / zoom / 2 }));
+        const { w, h } = sizeRef.current;
+        const cx = cam.x + w / cam.zoom / 2;
+        const cy = cam.y + h / cam.zoom / 2;
+        camGoalRef.current = camCentered({ x: cx, y: cy }, cam.zoom * f);
+        followRef.current = false;
+        requestRender();
+    };
+    const easeTo = (pt: Pt, zoom?: number) => {
+        const cam = camRef.current;
+        if (!cam) return;
+        camGoalRef.current = camCentered(pt, zoom ?? cam.zoom);
+        followRef.current = false;
+        requestRender();
+    };
+    const fitAll = () => {
+        const { w, h } = sizeRef.current;
+        camGoalRef.current = clampCam({ zoom: Math.max(w / WORLD_W, h / WORLD_H), x: 0, y: 0 });
+        followRef.current = false;
+        requestRender();
     };
     const onMiniClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const r = e.currentTarget.getBoundingClientRect();
-        centerOn({ x: ((e.clientX - r.left) / r.width) * WORLD_W, y: ((e.clientY - r.top) / r.height) * WORLD_H });
+        easeTo({ x: ((e.clientX - r.left) / r.width) * WORLD_W, y: ((e.clientY - r.top) / r.height) * WORLD_H });
+    };
+    // Teclado: setas/WASD movem a visão, +/− aproximam, C centraliza no Cartógrafo
+    const onKeyDown = (e: React.KeyboardEvent) => {
+        const cam = camGoalRef.current ?? camRef.current;
+        if (!cam) return;
+        const { w, h } = sizeRef.current;
+        const stepX = (w / cam.zoom) * 0.18;
+        const stepY = (h / cam.zoom) * 0.18;
+        const pan = (dx: number, dy: number) => {
+            camGoalRef.current = clampCam({ ...cam, x: cam.x + dx, y: cam.y + dy });
+            followRef.current = false;
+            requestRender();
+        };
+        switch (e.key) {
+            case "ArrowLeft":
+            case "a":
+                pan(-stepX, 0);
+                break;
+            case "ArrowRight":
+            case "d":
+                pan(stepX, 0);
+                break;
+            case "ArrowUp":
+            case "w":
+                pan(0, -stepY);
+                break;
+            case "ArrowDown":
+            case "s":
+                pan(0, stepY);
+                break;
+            case "+":
+            case "=":
+                zoomBy(1.25);
+                break;
+            case "-":
+                zoomBy(1 / 1.25);
+                break;
+            case "c":
+            case "C":
+                if (heroRef.current) easeTo(heroRef.current);
+                break;
+            default:
+                return;
+        }
+        e.preventDefault();
+    };
+    const toggleReduce = () => {
+        const next = !reduceMotion;
+        setReduceOverride(next);
+        try {
+            window.localStorage.setItem("atlas:reduceMotion", next ? "1" : "0");
+        } catch {
+            /* storage indisponível */
+        }
     };
 
     const remainingChests = marks.filter((m) => !expedition?.marksCollected.includes(m.id)).length;
     const domains = discoveredTowns.map((t) => ({ t, place: PLACE_BY_ID[t.placeId] }));
+    const hoverPlace = hoverInfo && hoverInfo.kind !== "chest" ? PLACE_BY_ID[hoverInfo.placeId] : null;
 
     return (
         <div className="flex flex-col gap-3 lg:flex-row">
             {/* Moldura do mapa */}
-            <div className="relative flex-1 rounded-xl border-[3px] border-[#6b5232] bg-[#05060d] p-1 shadow-[inset_0_0_0_1px_#c9a45c,0_8px_30px_rgba(0,0,0,0.45)]">
+            <div className="relative flex-1 rounded-xl border-[3px] border-[#6b5232] bg-[#05060d] p-1 shadow-[inset_0_0_0_1px_#c9a45c,0_8px_30px_rgba(0,0,0,0.45)] focus-within:ring-2 focus-within:ring-[#ffd36b] focus-within:ring-offset-2 focus-within:ring-offset-[#05060d]">
                 <div ref={wrapRef} className="relative h-[62vh] min-h-[380px] w-full overflow-hidden rounded-md">
                     <canvas
                         ref={canvasRef}
-                        className="absolute inset-0 h-full w-full touch-none"
-                        style={{ cursor: hover?.kind === "town" ? "pointer" : "crosshair" }}
+                        tabIndex={0}
+                        className="absolute inset-0 h-full w-full touch-none outline-none"
+                        style={{ cursor: hoverInfo?.kind === "town" ? "pointer" : "crosshair" }}
                         aria-label="Mapa de aventura do multiverso digital"
-                        role="img"
+                        aria-describedby="atlas-map-help"
+                        role="application"
                         onPointerDown={onPointerDown}
                         onPointerMove={onPointerMove}
                         onPointerUp={onPointerUp}
                         onPointerLeave={() => {
-                            setPointer(null);
-                            setScreenPt(null);
+                            pointerRef.current = null;
+                            setHoverInfo(null);
+                            requestRender();
                         }}
                         onWheel={onWheel}
+                        onKeyDown={onKeyDown}
                     />
-                    {!terrainReady && (
+                    <p id="atlas-map-help" className="sr-only">
+                        Setas ou WASD movem a visão, + e − aproximam, C centraliza no Cartógrafo. Clique para mover o Cartógrafo.
+                    </p>
+                    {!terrain && (
                         <div className="absolute inset-0 flex items-center justify-center text-sm text-[#eadcbc]">Desenhando o mundo…</div>
                     )}
-                    {hover && screenPt && (
-                        <div
-                            className="pointer-events-none absolute z-10 max-w-[240px] rounded-md border border-[#c9a45c] bg-[#1e1a14]/95 px-3 py-2 text-xs text-[#eadcbc] shadow-lg"
-                            style={{ left: Math.min(screenPt.x + 14, size.w - 250), top: Math.max(8, screenPt.y - 10) }}
-                        >
-                            {hover.kind === "town" && (() => {
-                                const place = PLACE_BY_ID[hover.t.placeId];
-                                const s = scoresFor(place.id);
-                                const min = minutes.get(place.id) ?? 0;
-                                return (
-                                    <>
-                                        <div className="font-semibold text-[#fff3d0]">{place.name}</div>
-                                        <div className="italic text-[#d9c79a]">{epithet(place)}</div>
-                                        <div className="mt-1">{TERRAIN_INFO[s.terrain].label} · saúde {s.health}</div>
-                                        <div>Conteúdo: {CONTENT_VOLUME_LABELS[contentVolumeOf(place)]} · População: {place.population ? POPULATION_LABELS[place.population] : "incerta"}</div>
-                                        {min > 0 && <div>Você: {formatMinutes(min)}/semana</div>}
-                                        <div className="mt-1 text-[#bfae86]">Clique para abrir</div>
-                                    </>
-                                );
-                            })()}
-                            {hover.kind === "ruin" && (
+                    <div
+                        ref={tooltipRef}
+                        className={`pointer-events-none absolute left-0 top-0 z-10 max-w-[240px] rounded-md border border-[#c9a45c] bg-[#1e1a14]/95 px-3 py-2 text-[13px] leading-snug text-[#eadcbc] shadow-lg ${hoverInfo ? "" : "hidden"}`}
+                    >
+                        {hoverInfo?.kind === "town" && hoverPlace && (() => {
+                            const s = scoresFor(hoverPlace.id);
+                            const min = props.usage.find((u) => u.placeId === hoverPlace.id)?.weeklyMinutes ?? 0;
+                            return (
                                 <>
-                                    <div className="font-semibold text-[#fff3d0]">Ruína misteriosa</div>
-                                    <div>Ninguém sabe o que há aqui. Leve o Cartógrafo até lá para revelar.</div>
-                                    {rumors[hover.t.placeId] && <div className="mt-1 text-[#c9a6ff]">Rumor: {epithet(PLACE_BY_ID[hover.t.placeId])}</div>}
+                                    <div className="font-semibold text-[#fff3d0]">{hoverPlace.name}</div>
+                                    <div className="italic text-[#d9c79a]">{epithet(hoverPlace)}</div>
+                                    <div className="mt-1">{TERRAIN_INFO[s.terrain].label} · saúde {s.health}</div>
+                                    <div>Conteúdo: {CONTENT_VOLUME_LABELS[contentVolumeOf(hoverPlace)]} · População: {hoverPlace.population ? POPULATION_LABELS[hoverPlace.population] : "incerta"}</div>
+                                    {min > 0 && <div>Você: {formatMinutes(min)}/semana</div>}
+                                    <div className="mt-1 text-[#bfae86]">Clique para abrir</div>
                                 </>
-                            )}
-                            {hover.kind === "chest" && (
-                                <>
-                                    <div className="font-semibold text-[#fff3d0]">Baú de marco</div>
-                                    <div>Alcance-o para ganhar um rumor sobre um setor próximo.</div>
-                                </>
-                            )}
-                        </div>
-                    )}
+                            );
+                        })()}
+                        {hoverInfo?.kind === "ruin" && hoverPlace && (
+                            <>
+                                <div className="font-semibold text-[#fff3d0]">Ruína misteriosa</div>
+                                <div>Ninguém sabe o que há aqui. Leve o Cartógrafo até lá para revelar.</div>
+                                {rumors[hoverPlace.id] && <div className="mt-1 text-[#c9a6ff]">Rumor: {epithet(hoverPlace)}</div>}
+                            </>
+                        )}
+                        {hoverInfo?.kind === "chest" && (
+                            <>
+                                <div className="font-semibold text-[#fff3d0]">Baú de marco</div>
+                                <div>Alcance-o para ganhar um rumor sobre um setor próximo.</div>
+                            </>
+                        )}
+                    </div>
                     <div className="absolute right-2 top-2 flex flex-col overflow-hidden rounded-md border border-[#c9a45c] bg-[#1e1a14]/90 text-[#eadcbc]">
-                        <button onClick={() => zoomBy(1.25)} className="p-2 hover:bg-[#3a3024]" aria-label="Aproximar"><Plus className="h-4 w-4" /></button>
-                        <button onClick={() => zoomBy(1 / 1.25)} className="p-2 hover:bg-[#3a3024]" aria-label="Afastar"><Minus className="h-4 w-4" /></button>
-                        <button onClick={() => expedition && centerOn(expedition.cartographer)} className="p-2 hover:bg-[#3a3024]" aria-label="Centralizar no Cartógrafo"><Crosshair className="h-4 w-4" /></button>
-                        <button onClick={() => setCam(clampCam({ zoom: fitZoom, x: 0, y: 0 }))} className="p-2 hover:bg-[#3a3024]" aria-label="Ver mundo inteiro"><Maximize2 className="h-4 w-4" /></button>
+                        <button onClick={() => zoomBy(1.25)} className="p-2 hover:bg-[#3a3024] focus-visible:bg-[#3a3024]" aria-label="Aproximar"><Plus className="h-4 w-4" /></button>
+                        <button onClick={() => zoomBy(1 / 1.25)} className="p-2 hover:bg-[#3a3024] focus-visible:bg-[#3a3024]" aria-label="Afastar"><Minus className="h-4 w-4" /></button>
+                        <button onClick={() => heroRef.current && easeTo(heroRef.current)} className="p-2 hover:bg-[#3a3024] focus-visible:bg-[#3a3024]" aria-label="Centralizar no Cartógrafo"><Crosshair className="h-4 w-4" /></button>
+                        <button onClick={fitAll} className="p-2 hover:bg-[#3a3024] focus-visible:bg-[#3a3024]" aria-label="Ver mundo inteiro"><Maximize2 className="h-4 w-4" /></button>
                     </div>
                 </div>
             </div>
@@ -1070,7 +1672,7 @@ export function AdventureMap(props: Props) {
                     ref={miniRef}
                     onClick={onMiniClick}
                     className="aspect-[1.6] w-full cursor-pointer rounded border border-[#c9a45c] bg-black"
-                    aria-label="Minimapa"
+                    aria-label="Minimapa: clique para levar a visão até o ponto"
                 />
                 <div className="rounded-md border border-[#5a4628] bg-[#15120d] p-2.5">
                     <div className="flex items-center justify-between text-sm font-semibold text-[#fff3d0]">
@@ -1081,12 +1683,12 @@ export function AdventureMap(props: Props) {
                     </div>
                     <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[#3a3024]">
                         <div
-                            className="h-full rounded-full bg-gradient-to-r from-[#3fae4a] to-[#8fdc5a]"
+                            className="h-full rounded-full bg-gradient-to-r from-[#3fae4a] to-[#8fdc5a] transition-[width] duration-500 ease-out"
                             style={{ width: `${leagues ? Math.round((leagues.available / Math.max(1, leagues.total)) * 100) : 0}%` }}
                         />
                     </div>
                     {leagues && (
-                        <div className="mt-1 text-[10px] text-[#a8976f]">
+                        <div className="mt-1 text-[11px] text-[#a8976f]">
                             base {leagues.base} · fontes +{leagues.fontes} · bônus +{leagues.bonus} · renova à meia-noite
                         </div>
                     )}
@@ -1101,10 +1703,10 @@ export function AdventureMap(props: Props) {
                                 <li key={t.placeId}>
                                     <button
                                         onClick={() => {
-                                            centerOn(t.center);
+                                            easeTo(t.center);
                                             onSelect(t.placeId);
                                         }}
-                                        className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-[#2a2319]"
+                                        className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[13px] hover:bg-[#2a2319] focus-visible:bg-[#2a2319] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#ffd36b]"
                                     >
                                         <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: REALM_BY_ID[t.realm].color }} />
                                         <span className="truncate text-[#fff3d0]">{place.name}</span>
@@ -1124,13 +1726,18 @@ export function AdventureMap(props: Props) {
                         <div className="text-[#a8976f]">baús restantes</div>
                     </div>
                 </div>
-                <ul className="space-y-1 text-[11px] text-[#bfae86]">
+                <label className="flex items-center gap-2 text-xs text-[#d9c79a]">
+                    <input type="checkbox" checked={reduceMotion} onChange={toggleReduce} className="accent-[#c9a45c]" />
+                    Reduzir movimento (sem tremor nem animações)
+                </label>
+                <ul className="space-y-1 text-[12px] text-[#bfae86]">
                     <li>🏰 Castelo = território revelado (tamanho = conteúdo; casas = população)</li>
                     <li>🏛️ Ruína “?” = setor avistado, ainda sem nome</li>
                     <li>🚩 Bandeira vermelha = você habita · brilho dourado = lanternas</li>
                     <li>➤ Setas verdes = alcança hoje · vermelhas = além das léguas</li>
+                    <li>⌨️ Setas/WASD movem a visão · +/− zoom · C centraliza</li>
                 </ul>
-                <div className="text-[10px] text-[#8a7a58]">
+                <div className="text-[11px] text-[#8a7a58]">
                     Biomas: {REALMS.map((r) => BIOME_STYLE[REALM_BIOME[r.id as CategoryId]].label).slice(0, 4).join(", ")}…
                 </div>
             </aside>

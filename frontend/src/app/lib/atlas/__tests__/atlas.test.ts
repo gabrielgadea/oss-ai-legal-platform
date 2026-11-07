@@ -471,7 +471,8 @@ test("expedição: ações reais creditam léguas; sem modo é no-op", () => {
 });
 
 // ── Mapa de aventura (terreno procedural) ───────────────────────────────────
-import { generateAdventure, generateRoads, pointInPolygon, quadPoint, REALM_BIOME, BIOME_STYLE } from "../adventure";
+import { generateAdventure, generateRoads, pointInPolygon, quadPoint, REALM_BIOME, BIOME_STYLE, valueNoise, fbm, smoothstep, clusterAcceptance } from "../adventure";
+import { seededRandom } from "../multiverse";
 import { islandPolygon } from "../world";
 
 test("aventura: biomas definidos e terreno determinístico", () => {
@@ -514,4 +515,50 @@ test("aventura: estradas ligam todas as cidades de cada reino (árvore)", () => 
     assert.deepEqual(quadPoint(r0, 1), r0.to);
     assert.ok(pointInPolygon({ x: 1, y: 1 }, [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]));
     assert.ok(!pointInPolygon({ x: 9, y: 1 }, [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]));
+});
+
+// ── skill procedural-gen: PRNG próprio fixado, fBm normalizado, aglomeração ──
+
+test("procgen: PRNG próprio tem saídas fixadas (sementes compartilháveis sobrevivem a atualizações)", () => {
+    const r = seededRandom(42);
+    assert.deepEqual([r(), r(), r()].map((v) => v.toFixed(10)), ["0.6011037519", "0.4482905590", "0.8524657935"]);
+});
+
+test("procgen: fBm é determinístico, fica em 0..1 e sementes distintas se descorrelacionam", () => {
+    const a = valueNoise(1);
+    const a2 = valueNoise(1);
+    const b = valueNoise(2);
+    let diff = 0;
+    for (let i = 0; i < 400; i++) {
+        const x = (i % 20) * 0.73 + 0.11;
+        const y = Math.floor(i / 20) * 0.61 + 0.07;
+        const v = fbm(a, x, y);
+        assert.ok(v >= 0 && v <= 1, `fbm fora de 0..1: ${v}`);
+        assert.equal(v, fbm(a2, x, y));
+        diff += Math.abs(v - fbm(b, x, y));
+    }
+    assert.ok(diff / 400 > 0.05, "campos com sementes diferentes não deveriam coincidir");
+});
+
+test("procgen: smoothstep e aceitação de aglomerados ficam em 0..1", () => {
+    assert.equal(smoothstep(0, 1, -1), 0);
+    assert.equal(smoothstep(0, 1, 2), 1);
+    assert.equal(smoothstep(0, 1, 0.5), 0.5);
+    const f = valueNoise(7);
+    const r = valueNoise(8);
+    let lo = 1;
+    let hi = 0;
+    for (let i = 0; i < 300; i++) {
+        const x = i * 13.7;
+        const y = i * 9.1;
+        for (const kind of ["tree", "mountain", "cottage"] as const) {
+            const v = clusterAcceptance(kind as never, x, y, f, r);
+            assert.ok(v >= 0 && v <= 1);
+            if (kind === "tree") {
+                lo = Math.min(lo, v);
+                hi = Math.max(hi, v);
+            }
+        }
+    }
+    assert.ok(hi - lo > 0.5, "vegetação deve formar bosques e clareiras, não uma camada uniforme");
 });
