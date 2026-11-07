@@ -16,7 +16,17 @@ import {
     type AtlasWorldStats,
 } from "@/app/lib/mikeApi";
 import { clearSecret, writeBackDiscovery, type WriteBackResult } from "@/app/lib/atlas/connectors";
-import { discoveredSet, revealedRealms } from "@/app/lib/atlas/world";
+import { discoveredSet, generateWorld, revealedRealms } from "@/app/lib/atlas/world";
+import {
+    BONUS_CONNECTOR,
+    BONUS_DECISION,
+    BONUS_IMPORT,
+    budget as computeBudget,
+    initExpedition,
+    resolveMove,
+    type Budget,
+    type MoveResult,
+} from "@/app/lib/atlas/expedition";
 import { configureAnalytics, track } from "@/app/lib/atlas/analytics";
 import { buildContribution } from "@/app/lib/atlas/brazil";
 import { computeGameStatus } from "@/app/lib/atlas/gamification";
@@ -30,9 +40,11 @@ import {
     disconnect,
     discover,
     setCaravan,
+    setExpedition,
     setWriteBack,
     toggleLantern,
     emptyState,
+    grantLeagues,
     loadLocal,
     removeSource,
     sanitizeState,
@@ -116,6 +128,17 @@ export function useAtlas() {
     const usage = useMemo(() => effectiveUsage(state), [state]);
     const discovered = useMemo(() => discoveredSet(state, usage), [state, usage]);
     const realms = useMemo(() => revealedRealms(discovered), [discovered]);
+
+    // Modo Expedição: geometria do mundo (determinística), habitados e orçamento.
+    const worldGeo = useMemo(() => generateWorld(), []);
+    const inhabited = useMemo(
+        () => [...new Set([...usage.map((u) => u.placeId), ...Object.keys(state.inhabit)])],
+        [usage, state.inhabit],
+    );
+    const leagues = useMemo<Budget | null>(
+        () => (state.expedition ? computeBudget(state.expedition, inhabited.length) : null),
+        [state.expedition, inhabited.length],
+    );
 
     // Mundo compartilhado (população, lanternas, ecos) e rumores das caravanas.
     const [world, setWorld] = useState<Record<string, AtlasWorldStats>>({});
@@ -214,7 +237,7 @@ export function useAtlas() {
         }, []),
         connect: useCallback(
             (id: ConnectorId, meta: { account: string; service: string }, placeId: string, inh: Omit<Inhabitance, "at" | "via">) => {
-                setState((s) => connect(s, id, meta, placeId, inh));
+                setState((s) => grantLeagues(connect(s, id, meta, placeId, inh), BONUS_CONNECTOR));
                 track("connector_connected", { connector: id });
                 notify({ kind: "info", text: `Ponte construída com ${id === "mastodon" ? "Mastodon" : "Bluesky"}: território verificado.` });
             },
@@ -241,8 +264,43 @@ export function useAtlas() {
         ),
         replaceState: useCallback((next: AtlasState) => setState({ ...next, updatedAt: new Date().toISOString() }), []),
         notify,
+        // ── Modo Expedição ──────────────────────────────────────────────
+        enterExpedition: useCallback(() => {
+            setState((s) => {
+                if (s.expedition) return s;
+                const u = effectiveUsage(s);
+                const disc = discoveredSet(s, u);
+                const inh = [...new Set([...u.map((x) => x.placeId), ...Object.keys(s.inhabit)])];
+                return setExpedition(s, initExpedition(generateWorld(), disc, inh));
+            });
+        }, []),
+        moveCartographer: useCallback(
+            (dest: { x: number; y: number }): MoveResult | null => {
+                const s = stateRef.current;
+                if (!s.expedition) return null;
+                const u = effectiveUsage(s);
+                const disc = discoveredSet(s, u);
+                const inhCount = new Set([...u.map((x) => x.placeId), ...Object.keys(s.inhabit)]).size;
+                const result = resolveMove(s.expedition, dest, worldGeo, disc, inhCount);
+                if (!result.moved) {
+                    notify({ kind: "info", text: "Léguas esgotadas por hoje. Volte amanhã ou traga dados reais para ganhar léguas." });
+                    return result;
+                }
+                setState((cur) => (cur.expedition ? setExpedition(cur, result.exp) : cur));
+                for (const y of result.collected) {
+                    notify(
+                        y.rumorPlaceId
+                            ? { kind: "info", text: `Marco alcançado — rumor: há uma «${y.epithet}» por perto.` }
+                            : { kind: "info", text: `Marco alcançado — +${y.leagues} léguas.` },
+                    );
+                }
+                if (result.truncated) notify({ kind: "info", text: "Você avançou até onde as léguas de hoje permitiram." });
+                return result;
+            },
+            [notify, worldGeo],
+        ),
         importResult: useCallback((result: ImportResult, fileName: string) => {
-            setState((s) => applyImport(s, result, fileName));
+            setState((s) => grantLeagues(applyImport(s, result, fileName), BONUS_IMPORT));
             track("import_succeeded", { source: result.source, places: result.records.length });
         }, []),
         saveManual: useCallback((records: UsageRecord[]) => {
@@ -255,7 +313,10 @@ export function useAtlas() {
             track("place_explored");
         }, []),
         decide: useCallback((placeId: string, decision: RouteDecision | null, target?: string) => {
-            setState((s) => setDecision(s, placeId, decision, target));
+            setState((s) => {
+                const next = setDecision(s, placeId, decision, target);
+                return decision ? grantLeagues(next, BONUS_DECISION) : next;
+            });
             if (decision) track("route_decided", { decision, withTarget: Boolean(target) });
         }, []),
         setBrazil: useCallback((uf: string | undefined, contribute: boolean) => {
@@ -289,6 +350,10 @@ export function useAtlas() {
         projectedMetrics,
         game,
         newBadges,
+        worldGeo,
+        expedition: state.expedition,
+        leagues,
+        inhabited,
         actions,
     };
 }

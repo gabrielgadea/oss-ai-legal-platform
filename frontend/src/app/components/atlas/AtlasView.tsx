@@ -33,10 +33,23 @@ const TABS: { id: Tab; label: string; icon: typeof MapIcon }[] = [
 export function AtlasView() {
     const atlas = useAtlas();
     const { state, usage, discovered, realms, world, rumors, metrics, projectedMetrics, game, actions } = atlas;
+    const { expedition: expState, leagues } = atlas;
     const [tab, setTab] = useState<Tab>("world");
     const [selected, setSelected] = useState<string | null>(null);
     const [expedition, setExpedition] = useState<string | null>(null);
     const [echo, setEcho] = useState<string | null>(null);
+    const [expMode, setExpMode] = useState(false);
+
+    const toggleExpMode = () => {
+        setExpMode((on) => {
+            if (!on) {
+                atlas.actions.enterExpedition();
+                setSelected(null);
+                track("tab_viewed", { tab: "expedition_mode" });
+            }
+            return !on;
+        });
+    };
 
     useEffect(() => {
         track("tab_viewed", { tab });
@@ -116,11 +129,35 @@ export function AtlasView() {
                                     </div>
                                 </div>
                             )}
-                            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                                <StatTile label="Territórios revelados" value={`${discovered.size}/${metrics.catalogSize}`} hint={`${realms.size} de ${REALMS.length} reinos`} />
-                                <StatTile label="Tempo semanal" value={usage.length ? formatMinutes(metrics.totalWeeklyMinutes) : "—"} />
-                                <StatTile label="Atenção saudável" value={usage.length ? String(metrics.healthyAttention) : "—"} hint="0–100, ponderado pelo tempo" />
-                                <StatTile label="Diversidade" value={usage.length ? String(metrics.diversity) : "—"} hint="Equilíbrio entre reinos" />
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="grid flex-1 grid-cols-2 gap-3 md:grid-cols-4">
+                                    <StatTile label="Territórios revelados" value={`${discovered.size}/${metrics.catalogSize}`} hint={`${realms.size} de ${REALMS.length} reinos`} />
+                                    <StatTile label="Tempo semanal" value={usage.length ? formatMinutes(metrics.totalWeeklyMinutes) : "—"} />
+                                    <StatTile label="Atenção saudável" value={usage.length ? String(metrics.healthyAttention) : "—"} hint="0–100, ponderado pelo tempo" />
+                                    <StatTile label="Diversidade" value={usage.length ? String(metrics.diversity) : "—"} hint="Equilíbrio entre reinos" />
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d8c9a3] bg-[#f8f1df] px-4 py-2.5">
+                                <button
+                                    onClick={toggleExpMode}
+                                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium ${expMode ? "bg-[#2b2216] text-[#f3e9d2]" : "border border-[#2b2216] text-[#2b2216]"}`}
+                                >
+                                    <Compass className="h-4 w-4" /> {expMode ? "Modo Expedição: ligado" : "Modo Expedição"}
+                                </button>
+                                {expMode && leagues ? (
+                                    <div className="flex flex-1 items-center gap-3">
+                                        <span className="text-xs font-medium text-[#5b4a32]">Léguas</span>
+                                        <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-[#e4d9bc]">
+                                            <div className="h-full rounded-full bg-[#2f6b34]" style={{ width: `${Math.round((leagues.available / Math.max(1, leagues.total)) * 100)}%` }} />
+                                        </div>
+                                        <span className="tabular-nums text-xs text-[#2b2216]">{Math.floor(leagues.available)}/{leagues.total}</span>
+                                        <span className="hidden text-[11px] text-[#7a6646] sm:inline" title="Base diária + fontes (territórios habitados) + bônus de ações reais">
+                                            base {leagues.base} · fontes +{leagues.fontes} · bônus +{leagues.bonus}
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <span className="text-xs text-[#7a6646]">Mova o Cartógrafo para dissipar a Bruma. Chegue a um território para revelá-lo.</span>
+                                )}
                             </div>
                             <WorldMap
                                 state={state}
@@ -133,9 +170,15 @@ export function AtlasView() {
                                 selected={selected}
                                 onSelect={setSelected}
                                 onExpedition={startExpedition}
+                                mode={expMode ? "expedition" : "browse"}
+                                expedition={expState}
+                                leagues={leagues}
+                                onMove={actions.moveCartographer}
                             />
                             <p className="text-xs text-gray-500">
-                                Arraste para navegar, use a roda do mouse ou os botões para aproximar. Clique numa terra hachurada para partir em expedição.
+                                {expMode
+                                    ? "Clique no mapa para mover o Cartógrafo e dissipar a Bruma (custa léguas; labirinto custa mais, trilhas menos). Marcos dão rumores; chegar a um território o revela."
+                                    : "Arraste para navegar, use a roda do mouse ou os botões para aproximar. Clique numa terra hachurada para partir em expedição."}
                             </p>
                         </div>
                     )}

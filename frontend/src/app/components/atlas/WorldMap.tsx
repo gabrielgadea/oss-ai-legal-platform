@@ -6,7 +6,14 @@ import type { AtlasWorldStats } from "@/app/lib/mikeApi";
 import { CONTENT_VOLUME_LABELS, PLACE_BY_ID, POPULATION_LABELS } from "@/app/lib/atlas/catalog";
 import { formatMinutes } from "@/app/lib/atlas/metrics";
 import { scoresFor, TERRAIN_INFO } from "@/app/lib/atlas/scoring";
-import type { AtlasState, CategoryId, EffectiveUsage, Terrain } from "@/app/lib/atlas/types";
+import {
+    FOG_CELL,
+    generateMarks,
+    reachTowards,
+    type Budget,
+    type MoveResult,
+} from "@/app/lib/atlas/expedition";
+import type { AtlasState, CategoryId, EffectiveUsage, ExpeditionState, Terrain } from "@/app/lib/atlas/types";
 import {
     REALMS,
     REALM_BY_ID,
@@ -18,6 +25,7 @@ import {
     generateWorld,
     placeSigil,
     visibilityOf,
+    type Pt,
     type Sigil,
     type Territory,
 } from "@/app/lib/atlas/world";
@@ -204,15 +212,54 @@ interface Props {
     selected: string | null;
     onSelect: (placeId: string) => void;
     onExpedition: (placeId: string) => void;
+    /** Modo Expedição (dinâmica de mapa de aventura). */
+    mode?: "browse" | "expedition";
+    expedition?: ExpeditionState;
+    leagues?: Budget | null;
+    /** Move o Cartógrafo rumo a um ponto; devolve o resultado para a UI. */
+    onMove?: (dest: Pt) => MoveResult | null;
 }
 
-export function WorldMap({ state, usage, discovered, realms, world, rumors, justRevealed, selected, onSelect, onExpedition }: Props) {
+export function WorldMap({ state, usage, discovered, realms, world, rumors, justRevealed, selected, onSelect, onExpedition, mode = "browse", expedition, leagues, onMove }: Props) {
     const geo = useMemo(() => generateWorld(), []);
     const minutes = useMemo(() => new Map(usage.map((u) => [u.placeId, u.weeklyMinutes])), [usage]);
     const [view, setView] = useState({ x: 0, y: 0, w: WORLD_W, h: WORLD_H });
     const [daySeed] = useState(() => Math.floor(Date.now() / 86_400_000));
+    const [hover, setHover] = useState<Pt | null>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const drag = useRef<{ px: number; py: number; vx: number; vy: number; moved: boolean } | null>(null);
+    const expeditionOn = mode === "expedition" && Boolean(expedition);
+
+    const eventToWorld = useCallback(
+        (e: { clientX: number; clientY: number }): Pt => {
+            const r = svgRef.current?.getBoundingClientRect();
+            if (!r) return { x: 0, y: 0 };
+            return { x: view.x + ((e.clientX - r.left) / r.width) * view.w, y: view.y + ((e.clientY - r.top) / r.height) * view.h };
+        },
+        [view],
+    );
+
+    const marks = useMemo(() => generateMarks(), []);
+    const liftedCells = useMemo(() => new Set(expedition?.fog ?? []), [expedition?.fog]);
+    const reach = useMemo(() => {
+        if (!expeditionOn || !expedition || !leagues || !hover) return null;
+        return reachTowards(expedition.cartographer, hover, leagues.available, geo, discovered);
+    }, [expeditionOn, expedition, leagues, hover, geo, discovered]);
+
+    const handleMapClick = useCallback(
+        (e: { clientX: number; clientY: number }) => {
+            if (!expeditionOn || !onMove || drag.current?.moved) return;
+            const p = eventToWorld(e);
+            const candidate = geo.territories.find((t) => Math.hypot(t.center.x - p.x, t.center.y - p.y) <= t.radius);
+            const res = onMove(p);
+            if (!res || !res.moved || res.truncated) return;
+            if (candidate) {
+                if (visibilityOf(candidate.placeId, discovered, realms) === "discovered") onSelect(candidate.placeId);
+                else onExpedition(candidate.placeId);
+            }
+        },
+        [expeditionOn, onMove, eventToWorld, geo, discovered, realms, onSelect, onExpedition],
+    );
 
     const clampView = useCallback((v: typeof view) => {
         const w = Math.max(320, Math.min(WORLD_W, v.w));
@@ -241,7 +288,11 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
     const onPointerMove = (e: React.PointerEvent) => {
         const d = drag.current;
         const r = svgRef.current?.getBoundingClientRect();
-        if (!d || !r) return;
+        if (!r) return;
+        if (!d) {
+            if (expeditionOn) setHover(eventToWorld(e));
+            return;
+        }
         const dx = ((e.clientX - d.px) / r.width) * view.w;
         const dy = ((e.clientY - d.py) / r.height) * view.h;
         if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
@@ -285,7 +336,10 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={endDrag}
-                onPointerLeave={endDrag}
+                onPointerLeave={() => {
+                    endDrag();
+                    setHover(null);
+                }}
             >
                 <defs>
                     <filter id="paper" x="0" y="0" width="100%" height="100%">
@@ -507,6 +561,84 @@ export function WorldMap({ state, usage, discovered, realms, world, rumors, just
                         {`${discovered.size} territórios revelados · o resto aguarda sob a hachura`}
                     </text>
                 </g>
+
+                {/* ── Modo Expedição: Bruma, Marcos, rota e Cartógrafo ── */}
+                {expeditionOn && expedition && (
+                    <>
+                        <defs>
+                            <filter id="fogfeather" x="-20%" y="-20%" width="140%" height="140%">
+                                <feGaussianBlur stdDeviation="16" />
+                            </filter>
+                            <mask id="bruma-mask">
+                                <rect x={-200} y={-200} width={WORLD_W + 400} height={WORLD_H + 400} fill="white" />
+                                <g filter="url(#fogfeather)" fill="black">
+                                    {[...liftedCells].map((k) => {
+                                        const [c, r] = k.split(",").map(Number);
+                                        return <rect key={k} x={c * FOG_CELL - 4} y={r * FOG_CELL - 4} width={FOG_CELL + 8} height={FOG_CELL + 8} />;
+                                    })}
+                                </g>
+                            </mask>
+                        </defs>
+                        <rect
+                            x={-200}
+                            y={-200}
+                            width={WORLD_W + 400}
+                            height={WORLD_H + 400}
+                            fill="#0a0a12"
+                            opacity={0.9}
+                            mask="url(#bruma-mask)"
+                            className="pointer-events-none"
+                        />
+
+                        {/* Marcos revelados pela bruma, ainda não coletados */}
+                        {marks.map((m) => {
+                            const key = `${Math.floor(m.pos.x / FOG_CELL)},${Math.floor(m.pos.y / FOG_CELL)}`;
+                            if (expedition.marksCollected.includes(m.id) || !liftedCells.has(key)) return null;
+                            return (
+                                <g key={m.id} transform={`translate(${m.pos.x},${m.pos.y})`} className="pointer-events-none">
+                                    <path d="M0 6 L0 -12" stroke={INK} strokeWidth="2" />
+                                    <path d="M0 -12 L12 -9 L0 -4 Z" fill="#d7b54a" stroke={INK} strokeWidth="1" />
+                                    <circle cx="0" cy="8" r="2.5" fill={INK} />
+                                    <text x="0" y="-15" textAnchor="middle" style={{ fontSize: 11, fontWeight: 700, fill: "#6a5a1f", paintOrder: "stroke", stroke: PARCHMENT, strokeWidth: 3 }}>?</text>
+                                </g>
+                            );
+                        })}
+
+                        {/* Rota planejada até o cursor */}
+                        {reach && hover && (
+                            <g className="pointer-events-none">
+                                <line x1={expedition.cartographer.x} y1={expedition.cartographer.y} x2={reach.point.x} y2={reach.point.y} stroke="#2f6b34" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 7" />
+                                {reach.truncated && (
+                                    <line x1={reach.point.x} y1={reach.point.y} x2={hover.x} y2={hover.y} stroke="#8f2d26" strokeWidth={2.5} strokeLinecap="round" strokeDasharray="1 7" opacity={0.8} />
+                                )}
+                                <circle cx={reach.point.x} cy={reach.point.y} r={6} fill="none" stroke={reach.truncated ? "#b27300" : "#2f6b34"} strokeWidth={2} />
+                                <text x={reach.point.x + 10} y={reach.point.y - 8} style={{ fontSize: 12, fontWeight: 700, fill: "#2b2216", paintOrder: "stroke", stroke: PARCHMENT, strokeWidth: 3.5 }}>
+                                    {Math.ceil(reach.cost)} léguas
+                                </text>
+                            </g>
+                        )}
+
+                        {/* O Cartógrafo */}
+                        <g transform={`translate(${expedition.cartographer.x},${expedition.cartographer.y})`} className="pointer-events-none">
+                            <ellipse cx="0" cy="3" rx="9" ry="3.5" fill="#000" opacity="0.25" />
+                            <path d="M0 2 L0 -20" stroke="#2b2216" strokeWidth="2.5" />
+                            <path d="M0 -20 L16 -16 L0 -10 Z" fill="#8f2d26" stroke="#2b2216" strokeWidth="1" />
+                            <circle cx="0" cy="2" r="4.5" fill="#f3e9d2" stroke="#2b2216" strokeWidth="1.5" />
+                        </g>
+
+                        {/* Captura de cliques: no modo expedição, clicar move o Cartógrafo */}
+                        <rect
+                            x={-200}
+                            y={-200}
+                            width={WORLD_W + 400}
+                            height={WORLD_H + 400}
+                            fill="transparent"
+                            onClick={handleMapClick}
+                            style={{ cursor: "crosshair" }}
+                        />
+                    </>
+                )}
+
                 <rect x={view.x} y={view.y} width={view.w} height={view.h} fill="url(#vignette)" className="pointer-events-none" />
             </svg>
 

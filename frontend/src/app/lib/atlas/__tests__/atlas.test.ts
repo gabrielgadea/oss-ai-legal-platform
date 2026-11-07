@@ -383,3 +383,89 @@ test("conectores: chamadas às APIs com o formato documentado", async () => {
     assert.equal(st.discoveries.mastodon.verified, true);
     assert.equal(st.inhabit.mastodon.posts, 12);
 });
+
+// ── Modo Expedição (dinâmica de mapa de aventura) ───────────────────────────
+import {
+    initExpedition, budget, resolveMove, creditLeagues, leagueCost, reachTowards,
+    fontesLeagues, generateMarks, nearestHatched, collectMarkYield, todayKey,
+    DAILY_LEAGUES, LEAGUE_PX, FONTE_LEAGUES, BONUS_IMPORT,
+} from "../expedition";
+import { grantLeagues, setExpedition } from "../state";
+
+test("expedição: orçamento diário com fontes e bônus, reset ao virar o dia", () => {
+    const world = generateWorld();
+    const exp = initExpedition(world, new Set(), []);
+    assert.equal(exp.leaguesSpent, 0);
+    assert.equal(budget(exp, 0).total, DAILY_LEAGUES);
+    assert.equal(budget(exp, 3).fontes, 3 * FONTE_LEAGUES);
+    assert.equal(budget(exp, 99).fontes, 5 * FONTE_LEAGUES); // teto de 5 fontes
+    // bônus some no dia seguinte
+    const withBonus = creditLeagues(exp, 50);
+    assert.equal(budget(withBonus, 0).bonus, 50);
+    const yesterday = { ...withBonus, leaguesDay: "2000-01-01", leaguesSpent: 40 };
+    const b = budget(yesterday, 0);
+    assert.equal(b.spent, 0);
+    assert.equal(b.bonus, 0);
+    assert.equal(todayKey(new Date("2026-11-07T10:00:00")), "2026-11-07");
+});
+
+test("expedição: custo de léguas, trilha e truncamento", () => {
+    const world = generateWorld();
+    const discovered = new Set<string>();
+    const a = { x: 100, y: 100 };
+    const b = { x: 100 + LEAGUE_PX * 10, y: 100 }; // 10 léguas em terra aberta
+    const cost = leagueCost(a, b, world, discovered);
+    assert.ok(Math.abs(cost - 10) < 0.01, `custo ${cost}`);
+    // trunca quando falta orçamento
+    const r = reachTowards(a, b, 4, world, discovered);
+    assert.ok(r.truncated);
+    assert.ok(Math.abs(r.cost - 4) < 0.01);
+    assert.ok(r.point.x < b.x && r.point.x > a.x);
+    // dentro do orçamento, chega inteiro
+    const r2 = reachTowards(a, b, 100, world, discovered);
+    assert.equal(r2.truncated, false);
+    assert.deepEqual(r2.point, b);
+});
+
+test("expedição: mover dissipa bruma, gasta léguas e não ultrapassa o orçamento", () => {
+    const world = generateWorld();
+    const discovered = new Set<string>();
+    const exp = initExpedition(world, discovered, []);
+    const fog0 = exp.fog.length;
+    const far = { x: exp.cartographer.x + 5000, y: exp.cartographer.y }; // muito além do orçamento
+    const res = resolveMove(exp, far, world, discovered, 0);
+    assert.ok(res.moved && res.truncated);
+    assert.ok(res.exp.fog.length > fog0, "a bruma foi dissipada no caminho");
+    const avail = budget(exp, 0).available;
+    assert.ok(res.exp.leaguesSpent <= avail + 0.01);
+    assert.ok(res.exp.leaguesSpent > 0);
+    // sem léguas, não move
+    const drained = { ...res.exp };
+    const res2 = resolveMove(drained, { x: drained.cartographer.x + 4000, y: drained.cartographer.y }, world, discovered, 0);
+    assert.equal(res2.moved, false);
+});
+
+test("expedição: marcos rendem rumor do território hachurado mais próximo", () => {
+    const world = generateWorld();
+    const marks = generateMarks();
+    assert.equal(marks.length, 8); // um por reino
+    const discovered = new Set<string>();
+    const near = nearestHatched(marks[0].pos, world, discovered);
+    assert.ok(near && PLACE_BY_ID[near]);
+    const y = collectMarkYield(marks[0], world, discovered);
+    assert.ok(y.rumorPlaceId && y.epithet && y.leagues === 0);
+    // se tudo já foi descoberto, o marco vira bônus de léguas
+    const allKnown = new Set(PLACES.map((p) => p.id));
+    const y2 = collectMarkYield(marks[0], world, allKnown);
+    assert.equal(y2.rumorPlaceId, null);
+    assert.ok(y2.leagues > 0);
+});
+
+test("expedição: ações reais creditam léguas; sem modo é no-op", () => {
+    let s = emptyState();
+    assert.equal(grantLeagues(s, BONUS_IMPORT), s); // no-op sem expedição
+    s = setExpedition(s, initExpedition(generateWorld(), new Set(), []));
+    const before = s.expedition!.leaguesBonus;
+    s = grantLeagues(s, BONUS_IMPORT);
+    assert.equal(s.expedition!.leaguesBonus, before + BONUS_IMPORT);
+});

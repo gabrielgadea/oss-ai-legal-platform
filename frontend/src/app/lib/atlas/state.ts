@@ -3,11 +3,13 @@
  * A sincronização com o backend é feita pelo hook `useAtlas`.
  */
 
+import { creditLeagues } from "./expedition";
 import { recordKey } from "./metrics";
 import type {
     AtlasState,
     ConnectorId,
     DiscoveryMethod,
+    ExpeditionState,
     ImportResult,
     ImportSummary,
     Inhabitance,
@@ -157,6 +159,17 @@ export function disconnect(state: AtlasState, id: ConnectorId): AtlasState {
 
 export function setWriteBack(state: AtlasState, id: ConnectorId, on: boolean): AtlasState {
     return touch({ ...state, writeBack: { ...state.writeBack, [id]: on } });
+}
+
+/** Grava o estado do Modo Expedição. */
+export function setExpedition(state: AtlasState, expedition: ExpeditionState): AtlasState {
+    return touch({ ...state, expedition });
+}
+
+/** Credita léguas de bônus por uma ação real; no-op se o modo não foi iniciado. */
+export function grantLeagues(state: AtlasState, n: number): AtlasState {
+    if (!state.expedition || n <= 0) return state;
+    return touch({ ...state, expedition: creditLeagues(state.expedition, n) });
 }
 
 /** Validação defensiva do que vem do storage/servidor. */

@@ -95,6 +95,36 @@ da expedição.
 | Participar | **Habitar** | produzir, conversar e criar laços num território |
 | Check-in | **Fincar bandeira** | revelar um território indo até ele |
 
+## 0.2 Modo Expedição (dinâmica de mapa de aventura)
+
+Inspirado nos mapas de **Heroes of Might & Magic** (sem clonar arte, nomes ou
+UI), o botão **Modo Expedição** na aba Mundo transforma o mapa num tabuleiro de
+exploração. O "modus operandi" do gênero — névoa de guerra que o herói dissipa
+ao andar, pontos de movimento diários que variam com terreno e estradas, e
+objetos (minas, tesouros) espalhados — foi traduzido assim (`lib/atlas/expedition.ts`):
+
+| Heroes M&M | Atlas | Implementação |
+|---|---|---|
+| Névoa de guerra | **a Bruma** | manto escuro com máscara SVG; dissipa num raio ao longo do caminho do Cartógrafo; o que foi dissipado fica salvo |
+| Herói | **o Cartógrafo** | peão no mapa; começa no território habitado mais usado |
+| Pontos de movimento/dia | **Léguas** | orçamento diário (base 60); 1 légua ≈ 24px; **labirinto custa +30%**, **trilha entre lugares conhecidos custa −50%**; zera a cada dia |
+| Minas / renda diária | **Fontes** | cada território **habitado** rende +8 léguas/dia (teto 5 fontes) |
+| Tesouros soltos | **Marcos** | 1 por reino; ao ser alcançado dá um **rumor** (revela o epíteto de um território hachurado próximo) ou +léguas |
+| Visitar cidade | **chegar a um território** | mover até um território hachurado dispara a **expedição real**; a um descoberto, abre o painel |
+
+**Laço de jogo:** explorar (gastar léguas para dissipar a Bruma) → coletar
+(marcos → rumores; habitar → fontes) → decidir para onde ir com léguas
+limitadas → reivindicar (expedição real). Ao passar o cursor, o mapa desenha a
+**rota** até ele, verde dentro do orçamento e vermelha além, com o custo em léguas.
+
+**Honestidade.** Mover e dissipar a Bruma é uma **camada de jogo**: não revela
+dados nem cria métricas. A revelação real (nome, qualificação) continua exigindo
+a expedição de verdade. As léguas vêm do orçamento diário, das fontes
+(territórios que você comprovadamente habita) e de **ações reais** (importar
+dados +20, decidir rota +10, conectar plataforma +25) — **nunca de tempo de
+tela**. Tudo é determinístico (mesma Bruma/marcos para o mesmo estado) e
+sincroniza pelo `/atlas/state` existente.
+
 ## 0.1 Integrações bidirecionais
 
 | Direção | Como |

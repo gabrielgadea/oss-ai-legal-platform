@@ -221,7 +221,31 @@ export interface AtlasState {
     connectors: Partial<Record<ConnectorId, { account: string; service: string; connectedAt: string }>>;
     /** Devolver descobertas automaticamente às plataformas de origem. */
     writeBack: Partial<Record<ConnectorId, boolean>>;
+    /** Modo Expedição (dinâmica de mapa de aventura). */
+    expedition?: ExpeditionState;
     updatedAt: string;
+}
+
+/**
+ * Estado da dinâmica de exploração (névoa + Cartógrafo + léguas).
+ * É uma CAMADA DE JOGO sobre o mapa real: mover e dissipar a Bruma não revela
+ * dados — só a expedição de verdade revela um território.
+ */
+export interface ExpeditionState {
+    /** Posição do Cartógrafo no viewBox 1600×1000 do mundo. */
+    cartographer: { x: number; y: number };
+    /** Células da grade de bruma já dissipadas ("col,row"). */
+    fog: string[];
+    /** Data (YYYY-MM-DD) do orçamento de léguas vigente. */
+    leaguesDay: string;
+    /** Léguas já gastas no dia. */
+    leaguesSpent: number;
+    /** Léguas de bônus acumuladas por ações reais (import, decisão, conexão). */
+    leaguesBonus: number;
+    /** Marcos já coletados (ids determinísticos). */
+    marksCollected: string[];
+    /** Rumores achados por marco: placeId → epíteto revelado. */
+    rumorsFound: string[];
 }
 
 export interface EffectiveUsage {
