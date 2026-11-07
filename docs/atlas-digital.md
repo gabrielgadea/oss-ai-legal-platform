@@ -11,6 +11,19 @@ toma decisões de rota que o mapa simula na hora.
 
 Rota no app: `/atlas` (item **Atlas Digital** na barra lateral).
 
+## 0. Estética: cosmos neural de dados
+
+O mapa não usa a linguagem de pergaminho medieval, e sim a de um **cosmos
+digital futurista**, para expressar o universo de conteúdo: fundo de espaço
+profundo com estrelas e **grade holográfica**; cada reino é uma
+**ilha-nebulosa** com contorno **neon** na sua cor, ligada por **filamentos**
+(teias de conexão entre territórios, como o k-NN do blueprint); territórios são
+**nós luminosos** com sigilo neon; o desconhecido é um **setor criptografado**
+(hachura escura); e os diálogos e HUD são **vidro escuro** com acentos ciano.
+A tipografia de interface é sans/monoespaçada; a serifada fica só nos títulos.
+Tokens no topo de `WorldMap.tsx` (`INK`, `PARCHMENT`→superfície escura, `NEON`…).
+Nada disso muda a mecânica — é só pele.
+
 ## 0. O Multiverso como mapa de RPG
 
 O mapa principal (aba **Mundo**) é uma carta de RPG desenhada em pergaminho.

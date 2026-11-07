@@ -57,17 +57,18 @@ export function StatTile({
     );
 }
 
-export function ScoreBars({ scores }: { scores: PlaceScores }) {
+export function ScoreBars({ scores, tone = "light" }: { scores: PlaceScores; tone?: "light" | "dark" }) {
+    const dark = tone === "dark";
     return (
         <div className="space-y-2">
             {(Object.keys(DIMENSION_LABELS) as ScoreDimension[]).map((d) => (
                 <div key={d} title={DIMENSION_HELP[d]}>
-                    <div className="flex justify-between text-xs text-gray-600">
+                    <div className={`flex justify-between text-xs ${dark ? "text-[#9fb4da]" : "text-gray-600"}`}>
                         <span>{DIMENSION_LABELS[d]}</span>
                         <span className="tabular-nums">{scores[d]}</span>
                     </div>
-                    <div className="mt-0.5 h-1.5 rounded-full bg-gray-100">
-                        <div className="h-1.5 rounded-full bg-gray-800" style={{ width: `${scores[d]}%` }} />
+                    <div className={`mt-0.5 h-1.5 rounded-full ${dark ? "bg-[#13213d]" : "bg-gray-100"}`}>
+                        <div className={`h-1.5 rounded-full ${dark ? "bg-[#5fe3ff]" : "bg-gray-800"}`} style={{ width: `${scores[d]}%` }} />
                     </div>
                 </div>
             ))}

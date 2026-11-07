@@ -387,7 +387,7 @@ test("conectores: chamadas às APIs com o formato documentado", async () => {
 // ── Modo Expedição (dinâmica de mapa de aventura) ───────────────────────────
 import {
     initExpedition, budget, resolveMove, creditLeagues, leagueCost, reachTowards,
-    fontesLeagues, generateMarks, nearestHatched, collectMarkYield, todayKey,
+    generateMarks, nearestHatched, collectMarkYield, todayKey,
     DAILY_LEAGUES, LEAGUE_PX, FONTE_LEAGUES, BONUS_IMPORT,
 } from "../expedition";
 import { grantLeagues, setExpedition } from "../state";

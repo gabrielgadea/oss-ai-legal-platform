@@ -110,21 +110,21 @@ export function AtlasView() {
                     {tab === "world" && (
                         <div className="space-y-4">
                             {blank && (
-                                <div className="flex flex-col gap-3 rounded-2xl border border-[#d8c9a3] bg-[#f8f1df] p-5 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex flex-col gap-3 rounded-2xl border border-[#1b2742] bg-[#070d1c] p-5 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
-                                        <h2 className="font-serif text-2xl text-[#2b2216]">Todo o mundo está sob a hachura</h2>
-                                        <p className="text-sm text-[#5b4a32]">
-                                            Revele o território que você já habita trazendo seus dados — ou atravesse a hachura numa expedição.
+                                        <h2 className="font-serif text-2xl text-[#eaf2ff]">O cosmos está sob criptografia</h2>
+                                        <p className="text-sm text-[#9fb4da]">
+                                            Ilumine os setores que você já habita trazendo seus dados — ou atravesse a bruma numa sondagem.
                                         </p>
                                     </div>
                                     <div className="flex shrink-0 gap-2">
-                                        <button onClick={() => setTab("connections")} className="rounded-lg border border-[#2b2216] px-3 py-2 text-sm text-[#2b2216]">Trazer meus dados</button>
+                                        <button onClick={() => setTab("connections")} className="rounded-lg border border-[#2e466e] px-3 py-2 text-sm text-[#9fb4da] hover:bg-[#13213d]">Trazer meus dados</button>
                                         <button onClick={() => {
                                                 const target = randomExpedition(discovered, Date.now());
                                                 if (target) startExpedition(target);
                                             }}
-                                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#2b2216] px-3 py-2 text-sm text-[#f3e9d2]">
-                                            <Compass className="h-4 w-4" /> Primeira expedição
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#5fe3ff] px-3 py-2 text-sm font-medium text-[#041018]">
+                                            <Compass className="h-4 w-4" /> Primeira sondagem
                                         </button>
                                     </div>
                                 </div>
@@ -137,26 +137,26 @@ export function AtlasView() {
                                     <StatTile label="Diversidade" value={usage.length ? String(metrics.diversity) : "—"} hint="Equilíbrio entre reinos" />
                                 </div>
                             </div>
-                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d8c9a3] bg-[#f8f1df] px-4 py-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1b2742] bg-[#070d1c] px-4 py-2.5">
                                 <button
                                     onClick={toggleExpMode}
-                                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium ${expMode ? "bg-[#2b2216] text-[#f3e9d2]" : "border border-[#2b2216] text-[#2b2216]"}`}
+                                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${expMode ? "bg-[#5fe3ff] text-[#041018]" : "border border-[#2e466e] text-[#9fb4da] hover:bg-[#13213d]"}`}
                                 >
                                     <Compass className="h-4 w-4" /> {expMode ? "Modo Expedição: ligado" : "Modo Expedição"}
                                 </button>
                                 {expMode && leagues ? (
                                     <div className="flex flex-1 items-center gap-3">
-                                        <span className="text-xs font-medium text-[#5b4a32]">Léguas</span>
-                                        <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-[#e4d9bc]">
-                                            <div className="h-full rounded-full bg-[#2f6b34]" style={{ width: `${Math.round((leagues.available / Math.max(1, leagues.total)) * 100)}%` }} />
+                                        <span className="text-xs font-medium text-[#9fb4da]">Léguas</span>
+                                        <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-[#13213d]">
+                                            <div className="h-full rounded-full bg-[#5fe3ff] shadow-[0_0_8px_#5fe3ff]" style={{ width: `${Math.round((leagues.available / Math.max(1, leagues.total)) * 100)}%` }} />
                                         </div>
-                                        <span className="tabular-nums text-xs text-[#2b2216]">{Math.floor(leagues.available)}/{leagues.total}</span>
-                                        <span className="hidden text-[11px] text-[#7a6646] sm:inline" title="Base diária + fontes (territórios habitados) + bônus de ações reais">
+                                        <span className="tabular-nums text-xs text-[#eaf2ff]">{Math.floor(leagues.available)}/{leagues.total}</span>
+                                        <span className="hidden font-mono text-[11px] text-[#6f86b4] sm:inline" title="Base diária + fontes (territórios habitados) + bônus de ações reais">
                                             base {leagues.base} · fontes +{leagues.fontes} · bônus +{leagues.bonus}
                                         </span>
                                     </div>
                                 ) : (
-                                    <span className="text-xs text-[#7a6646]">Mova o Cartógrafo para dissipar a Bruma. Chegue a um território para revelá-lo.</span>
+                                    <span className="text-xs text-[#6f86b4]">Mova o Cartógrafo para dissipar a Bruma. Chegue a um território para revelá-lo.</span>
                                 )}
                             </div>
                             <WorldMap

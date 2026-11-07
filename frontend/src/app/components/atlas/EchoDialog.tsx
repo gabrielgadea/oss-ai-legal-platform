@@ -67,23 +67,23 @@ export function EchoDialog({
     };
 
     return (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-            <div className="relative w-full max-w-md rounded-2xl border border-[#d8c9a3] bg-[#f8f1df] p-6 shadow-2xl">
-                <button onClick={onClose} className="absolute right-3 top-3 rounded p-1 hover:bg-[#efe3c6]" aria-label="Fechar">
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+            <div className="relative w-full max-w-md rounded-2xl border border-[#1e2c4a] bg-[#070d1c] p-6 text-[#cdd9f0] shadow-[0_0_60px_rgba(0,0,0,0.6)]">
+                <button onClick={onClose} className="absolute right-3 top-3 rounded p-1 text-[#8fa6cc] hover:bg-[#13213d]" aria-label="Fechar">
                     <X className="h-4 w-4" />
                 </button>
-                <h2 className="font-serif text-2xl text-[#2b2216]">{VOCAB.share.verb} “{place.name}”</h2>
-                <p className="mt-1 text-sm text-[#5b4a32]">{VOCAB.share.description}</p>
-                <blockquote className="mt-3 rounded-lg border border-[#d8c9a3] bg-[#f3e9d2] p-3 text-sm italic text-[#4a3c27]">
-                    {text} <span className="not-italic text-[#7a6646]">{link}</span>
+                <h2 className="font-serif text-2xl text-[#eaf2ff]">{VOCAB.share.verb} “{place.name}”</h2>
+                <p className="mt-1 text-sm text-[#9fb4da]">{VOCAB.share.description}</p>
+                <blockquote className="mt-3 rounded-lg border border-[#1e2c4a] bg-[#0a1430] p-3 text-sm italic text-[#9fb4da]">
+                    {text} <span className="not-italic text-[#5fe3ff]">{link}</span>
                 </blockquote>
 
                 {connected.length > 0 && (
                     <div className="mt-4">
-                        <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#7a6646]">Publicar direto (conectado)</div>
+                        <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#5fe3ff]">Publicar direto (conectado)</div>
                         <div className="flex flex-wrap gap-2">
                             {connected.map((id) => (
-                                <button key={id} onClick={() => void publish(id)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#2b2216] px-3 py-1.5 text-sm text-[#f3e9d2]">
+                                <button key={id} onClick={() => void publish(id)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#5fe3ff] px-3 py-1.5 text-sm font-medium text-[#041018]">
                                     <Send className="h-3.5 w-3.5" /> {id === "mastodon" ? "Mastodon" : "Bluesky"}
                                 </button>
                             ))}
@@ -92,10 +92,10 @@ export function EchoDialog({
                 )}
 
                 <div className="mt-4">
-                    <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#7a6646]">Ecoar em outras terras</div>
+                    <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#6f86b4]">Ecoar em outras terras</div>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                         {ECHO_TARGETS.map((t) => (
-                            <button key={t.id} onClick={() => open(t.id)} className="rounded-lg border border-[#c8b68c] px-3 py-1.5 text-sm text-[#2b2216] hover:bg-[#efe3c6]">
+                            <button key={t.id} onClick={() => open(t.id)} className="rounded-lg border border-[#2e466e] px-3 py-1.5 text-sm text-[#9fb4da] hover:bg-[#13213d]">
                                 {t.name}
                             </button>
                         ))}
@@ -104,7 +104,7 @@ export function EchoDialog({
                         value={instance}
                         onChange={(e) => setInstance(e.target.value)}
                         placeholder="Instância Mastodon (ex.: mastodon.social)"
-                        className="mt-2 w-full rounded-lg border border-[#c8b68c] bg-white/60 px-3 py-1.5 text-sm"
+                        className="mt-2 w-full rounded-lg border border-[#2e466e] bg-[#0a1430] px-3 py-1.5 text-sm text-[#cdd9f0] placeholder:text-[#4e6490]"
                     />
                 </div>
 
@@ -115,11 +115,11 @@ export function EchoDialog({
                             setStatus("Eco enviado ✓");
                         } else setStatus("Seu navegador não tem folha de compartilhamento nativa.");
                     }}
-                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#2b2216] px-3 py-2 text-sm font-medium text-[#2b2216] hover:bg-[#efe3c6]"
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#2e466e] px-3 py-2 text-sm font-medium text-[#9fb4da] hover:bg-[#13213d]"
                 >
                     <Share2 className="h-4 w-4" /> Outros apps do aparelho
                 </button>
-                {status && <p className="mt-3 text-sm text-[#4a3c27]">{status}</p>}
+                {status && <p className="mt-3 text-sm text-[#9fb4da]">{status}</p>}
             </div>
         </div>
     );

@@ -57,32 +57,32 @@ export function PlaceDrawer(props: Props) {
     if (vis !== "discovered") {
         const rumor = rumors[placeId];
         return (
-            <aside className="fixed inset-y-0 right-0 z-[120] flex w-full max-w-md flex-col border-l border-[#d8c9a3] bg-[#f8f1df] shadow-2xl">
-                <header className="flex items-start justify-between border-b border-[#d8c9a3] p-5">
+            <aside className="fixed inset-y-0 right-0 z-[120] flex w-full max-w-md flex-col border-l border-[#1e2c4a] bg-[#070d1c] text-[#cdd9f0] shadow-2xl">
+                <header className="flex items-start justify-between border-b border-[#1e2c4a] p-5">
                     <div>
-                        <div className="text-xs uppercase tracking-widest text-[#7a6646]">
+                        <div className="text-xs uppercase tracking-widest text-[#5fe3ff]">
                             {vis === "silhouette" ? realm.name : "Reino desconhecido"}
                         </div>
-                        <h2 className="mt-1 font-serif text-3xl text-[#2b2216]">Território hachurado</h2>
+                        <h2 className="mt-1 font-serif text-3xl text-[#eaf2ff]">Setor criptografado</h2>
                     </div>
-                    <button onClick={onClose} className="rounded-md p-1.5 hover:bg-[#efe3c6]" aria-label="Fechar"><X className="h-4 w-4" /></button>
+                    <button onClick={onClose} className="rounded-md p-1.5 text-[#8fa6cc] hover:bg-[#13213d]" aria-label="Fechar"><X className="h-4 w-4" /></button>
                 </header>
-                <div className="space-y-4 p-5 text-sm text-[#4a3c27]">
-                    <div className="h-28 rounded-xl border border-[#c8b68c]" style={{ backgroundImage: "repeating-linear-gradient(-45deg,#5b4a32 0 1px,transparent 1px 7px)", opacity: 0.6 }} />
+                <div className="space-y-4 p-5 text-sm text-[#9fb4da]">
+                    <div className="h-28 rounded-xl border border-[#1e2c4a]" style={{ backgroundImage: "repeating-linear-gradient(-45deg,#5fe3ff 0 1px,transparent 1px 8px)", opacity: 0.25 }} />
                     <p>
                         Ninguém sabe ao certo o que existe aqui. Sem nome, sem marca, sem fama para julgar antes da hora:
-                        a única forma de conhecer é <strong>ir</strong>.
+                        a única forma de conhecer é <strong className="text-[#cdd9f0]">ir</strong>.
                     </p>
                     {vis === "silhouette" && <p className="italic">Fica {realm.prep} {realm.name}: {realm.essence.toLowerCase()}</p>}
                     {rumor ? (
-                        <p className="rounded-lg border border-[#d8c9a3] bg-[#f3e9d2] p-3">
-                            ❝ Rumor da sua caravana ({rumor.join(", ")}): uma <em>{epithet(place)}</em>.
+                        <p className="rounded-lg border border-[#1e2c4a] bg-[#0a1430] p-3">
+                            ❝ Sinal da sua caravana ({rumor.join(", ")}): uma <em>{epithet(place)}</em>.
                         </p>
                     ) : (
-                        <p className="text-xs text-[#7a6646]">Junte-se a caravanas na aba Conexões para ouvir rumores destas terras.</p>
+                        <p className="text-xs text-[#6f86b4]">Junte-se a caravanas na aba Conexões para captar sinais destes setores.</p>
                     )}
-                    <button onClick={() => onExpedition(placeId)} className="inline-flex items-center gap-2 rounded-lg bg-[#2b2216] px-4 py-2 font-medium text-[#f3e9d2]">
-                        <Compass className="h-4 w-4" /> Partir em expedição
+                    <button onClick={() => onExpedition(placeId)} className="inline-flex items-center gap-2 rounded-lg bg-[#5fe3ff] px-4 py-2 font-medium text-[#041018]">
+                        <Compass className="h-4 w-4" /> Partir em sondagem
                     </button>
                 </div>
             </aside>
@@ -103,9 +103,9 @@ export function PlaceDrawer(props: Props) {
 
     return (
         <aside className="fixed inset-y-0 right-0 z-[120] flex w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl">
-            <header className="flex items-start justify-between gap-3 border-b border-[#d8c9a3] p-5" style={{ background: `${realm.color}14` }}>
+            <header className="flex items-start justify-between gap-3 border-b border-gray-200 p-5" style={{ background: `${realm.color}14` }}>
                 <div className="flex items-start gap-3">
-                    <div className="mt-1 rounded-full border border-[#5b4a32] bg-[#f8f1df] p-1.5"><EssenceGlyph realm={realm.id} size={24} /></div>
+                    <div className="mt-1 rounded-full border border-gray-300 bg-gray-50 p-1.5"><EssenceGlyph realm={realm.id} size={24} color="#334155" /></div>
                     <div>
                         <div className="text-xs text-gray-500">{realm.name}</div>
                         <h2 className="font-serif text-2xl text-gray-900">{place.name}</h2>
@@ -145,10 +145,10 @@ export function PlaceDrawer(props: Props) {
                 <p className="-mt-3 text-xs text-gray-500">{TERRAIN_INFO[scores.terrain].description}</p>
 
                 {/* Essência do local + os três volumes */}
-                <div className="rounded-xl border border-[#e4d9bc] bg-[#f8f1df] p-3">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
                     <div className="flex items-center gap-2">
-                        <PlaceSigilMark sigil={placeSigil(place)} size={22} />
-                        <span className="text-sm font-medium text-[#2b2216]">Essência: {SIGIL_MEANING[placeSigil(place)]}</span>
+                        <PlaceSigilMark sigil={placeSigil(place)} size={22} color="#334155" />
+                        <span className="text-sm font-medium text-gray-900">Essência: {SIGIL_MEANING[placeSigil(place)]}</span>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                         <div className="rounded-lg bg-white/60 p-2">
@@ -228,9 +228,9 @@ export function PlaceDrawer(props: Props) {
                 <div>
                     <h3 className="mb-2 text-sm font-semibold text-gray-900">Outros mundos {realm.prep} {realm.name}</h3>
                     {hidden.length > 0 && (
-                        <div className="mb-3 rounded-xl border border-[#d8c9a3] bg-[#f8f1df] p-3 text-sm text-[#4a3c27]">
-                            Há <strong>{hidden.length}</strong> {hidden.length === 1 ? "território mais luminoso" : "territórios mais luminosos"} neste reino ainda sob hachura.
-                            <button onClick={() => onExpedition(hidden[0])} className="mt-2 flex items-center gap-1.5 rounded-lg bg-[#2b2216] px-3 py-1.5 text-xs font-medium text-[#f3e9d2]">
+                        <div className="mb-3 rounded-xl border border-[#1e2c4a] bg-[#0a1430] p-3 text-sm text-[#9fb4da]">
+                            Há <strong className="text-[#eaf2ff]">{hidden.length}</strong> {hidden.length === 1 ? "setor mais luminoso" : "setores mais luminosos"} neste reino ainda sob criptografia.
+                            <button onClick={() => onExpedition(hidden[0])} className="mt-2 flex items-center gap-1.5 rounded-lg bg-[#5fe3ff] px-3 py-1.5 text-xs font-medium text-[#041018]">
                                 <Compass className="h-3.5 w-3.5" /> Partir rumo ao desconhecido
                             </button>
                         </div>
