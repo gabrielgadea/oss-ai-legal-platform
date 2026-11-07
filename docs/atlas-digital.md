@@ -11,6 +11,97 @@ toma decisões de rota que o mapa simula na hora.
 
 Rota no app: `/atlas` (item **Atlas Digital** na barra lateral).
 
+## 0. O Multiverso como mapa de RPG
+
+O mapa principal (aba **Mundo**) é uma carta de RPG desenhada em pergaminho.
+
+**Geografia inventada.** Os reinos formam um arquipélago procedural
+(`lib/atlas/world.ts`), sem relação com continentes, países ou fronteiras
+reais. Ninguém chega com mapa mental prévio, nem com preconceitos, sobre
+estas terras. A semente é fixa: todos os viajantes habitam o **mesmo** mundo.
+
+| Reino | Essência |
+|---|---|
+| Ilhas do Burburinho | fogueiras de conversa pública (redes sociais) |
+| Vale dos Espelhos | telas que contam histórias (vídeo) |
+| Costa dos Pombais | mensageiros de porta em porta (mensagens) |
+| Planalto das Torres | bibliotecas, mapas e escolas (conhecimento) |
+| Colinas Ressonantes | sons que acompanham a vida (áudio) |
+| Enseada dos Bazares | tendas de troca (comércio e finanças) |
+| Terras da Ágora | direitos e decisões em comum (cidadania) |
+| Bosque dos Jogos e Ofícios | arenas e oficinas (jogos e criação) |
+
+**Hachura = desconhecido.** Cada território passa por quatro estados:
+
+1. **Terra Incógnita**: o reino inteiro está hachurado, sem nome e sem número de territórios.
+2. **Silhueta**: o reino já foi pisado; seus outros territórios aparecem hachurados, sem nome.
+3. **Revelado**: nome, epíteto, qualificação e população.
+4. **Habitado / verificado**: você tem tempo de uso, publicações ou laços lá (acampamento ⛺, selo de cera).
+
+**Só se revela indo.** A expedição (`ExpeditionDialog`) abre a porta de
+entrada real do território em outra aba, sem antes mostrar o nome. Se a aba
+do Atlas ficar oculta por pelo menos 45 segundos, a hachura se dissolve. O
+Atlas mede **apenas** quanto tempo a própria aba ficou em segundo plano. Não
+vê o que a pessoa faz do outro lado. Importações e conectores revelam
+territórios como **verificados**.
+
+**Sem spoilers.** O catálogo aberto foi substituído pelo **Diário** (códice
+só do que foi revelado). Alternativas mais bem qualificadas ainda ocultas
+aparecem apenas como contagem ("há 3 territórios mais luminosos sob
+hachura"), com uma expedição às cegas.
+
+**Expressão visual da essência e da população**
+
+| Camada | Significado |
+|---|---|
+| Glifo do reino (fogueira, espelho, pombal, torre, ondas, tenda, coluna, estandarte) | essência do conteúdo |
+| Quantidade de glifos (1–5) | população em ordem de grandeza (<1 mi … >1 bi); `?` = incerta, nunca inventada |
+| Textura do solo: relva / trilhas / labirinto | Clareira / Trilha / Labirinto |
+| Acampamento ⛺ | você habita (tempo de uso ou dados de conector) |
+| Lanterna 🏮 e contagem | lanternas acesas por você e pelo mundo |
+| Selo de cera | descoberta verificada por dados |
+| ❝ | rumor de alguém da sua caravana |
+| Viajantes (no painel) | pessoas do Atlas que revelaram o território (k ≥ 5) |
+
+**Epítetos.** Cada território tem um nome de essência derivado dos
+atributos, nunca da marca. Exemplos: *Praça sem Coroa* (federado), *Galeria
+de Espelhos sem Fim* (feed infinito com autoplay), *Pombal dos Selos
+Abertos* (criptografado e de código aberto). É o que um rumor revela antes
+da expedição.
+
+### Vocabulário próprio (no lugar de seguir, curtir e compartilhar)
+
+| Plataformas | Atlas | Significado |
+|---|---|---|
+| Seguir | **Caravanar** (juntar-se à caravana) | viajar junto: os rumores das terras que a pessoa desbravou aparecem nas suas hachuras |
+| Curtir | **Acender** uma lanterna | deixar uma luz num território que valeu a viagem, para guiar outros |
+| Compartilhar | **Ecoar** | fazer a descoberta ressoar em outras terras |
+| Participar | **Habitar** | produzir, conversar e criar laços num território |
+| Check-in | **Fincar bandeira** | revelar um território indo até ele |
+
+## 0.1 Integrações bidirecionais
+
+| Direção | Como |
+|---|---|
+| ← Importar uso | arquivos de portabilidade (Takeout, Spotify, Netflix, CSV) |
+| ← Importar o que se habita | **Mastodon** (`GET /api/v1/accounts/verify_credentials`) e **Bluesky** (`com.atproto.server.createSession` + `app.bsky.actor.getProfile`): publicações, seguidores e seguindo. O território fica revelado e verificado. |
+| → Devolver descobertas automaticamente | com a opção ligada, cada território revelado vira publicação no **Mastodon** (`POST /api/v1/statuses`) e/ou no **Bluesky** (`com.atproto.repo.createRecord`, com facets de link em bytes UTF-8) |
+| → Ecoar manualmente | intenções oficiais: WhatsApp, Telegram, Bluesky, Mastodon, Threads, X, LinkedIn, Facebook, Reddit, e-mail, além da folha nativa (Web Share API) |
+| → Navegadores | favoritos por reino em formato Netscape (`.html`), importável em Chrome, Firefox, Safari e Edge |
+| → Agendas | expedição agendada em `.ics` (RFC 5545) sem revelar o destino |
+| ↔ O próprio Atlas | passaporte JSON (exportar e importar) |
+
+**Credenciais**: o token do Mastodon e a senha de aplicativo do Bluesky
+ficam só no navegador (sessionStorage por padrão; localStorage se a pessoa
+pedir). As chamadas vão direto do navegador à plataforma e **nunca** passam
+pelo servidor do Atlas. A devolução automática é opt-in por conector e tem
+prévia do texto.
+
+**Limite honesto**: Meta (Instagram, Facebook, Threads, WhatsApp), TikTok e X
+não oferecem API aberta para publicar ou ler histórico em nome de pessoas
+comuns. Para essas plataformas, a devolução é por intenção de
+compartilhamento, que a pessoa confirma.
+
 ---
 
 ## 1. Funcionalidades
@@ -58,9 +149,15 @@ A página é renderizada só no cliente para evitar divergência de hidratação
 | GET | `/atlas/brazil` | Agregados por UF dos últimos 28 dias, só UFs com ≥ 10 participantes. |
 | POST | `/atlas/events` | Lote de eventos de produto (lista fechada, props escalares). |
 | GET | `/atlas/analytics/overview` | Contagens e funil dos últimos 30 dias, sem dados individuais. |
+| PUT | `/atlas/discoveries` | Sincroniza os territórios revelados. |
+| PUT | `/atlas/marks` | Substitui lanternas e ecos da pessoa. |
+| GET | `/atlas/world` | Viajantes, verificados, lanternas e ecos por território (k ≥ 5; abaixo disso, `null` = "poucos"). |
+| GET/PUT | `/atlas/profile` | Handle de viajante e se os rumores são públicos. |
+| GET/PUT | `/atlas/caravan` | Caravanas que a pessoa acompanha e rumores (só de perfis públicos). |
 
 Todas exigem autenticação (`requireAuth`). Aplicar
-`backend/migrations/001_atlas_digital.sql` após o schema base.
+`backend/migrations/001_atlas_digital.sql` e depois
+`002_atlas_world.sql` após o schema base.
 
 ## 3. Metodologia de qualificação
 
@@ -133,7 +230,9 @@ navegador com medição local, importação de `.zip` do Takeout no próprio nav
 | Minimização (art. 6º, III) | Arquivos brutos nunca saem do dispositivo; só minutos por lugar são guardados. |
 | Consentimento (art. 7º, I) | O mapa do Brasil é opt-in, com finalidade explícita e revogável (DELETE `/atlas/contribution`). |
 | Anonimização prática | Contribuição sem lista de plataformas, valores arredondados de 5 em 5, exibição só agregada com k ≥ 10 por UF. Os dados são **pseudonimizados**, não anônimos: o `user_id` fica guardado para permitir exclusão. |
-| Eliminação (art. 18, VI) | Botão "Apagar todos os meus dados" (estado, eventos e contribuições). Exclusão da conta apaga tudo em cascata. |
+| Eliminação (art. 18, VI) | Botão "Apagar todos os meus dados" (estado, eventos, contribuições, descobertas, marcas, caravanas e perfil). Exclusão da conta apaga tudo em cascata. |
+| Mundo compartilhado | Viajantes, lanternas e ecos só aparecem com k ≥ 5. Rumores de caravana expõem apenas o epíteto, e só de quem tornou o perfil público. |
+| Credenciais de terceiros | Nunca chegam ao servidor do Atlas; ficam no navegador da pessoa. |
 | Analytics | Lista fechada de eventos, propriedades escalares sem conteúdo pessoal, retenção sugerida de 180 dias. |
 
 > ⚠️ Antes de produção: revisão jurídica do texto de consentimento, RIPD
@@ -154,6 +253,10 @@ npm run test:atlas --prefix frontend   # catálogo, scoring, métricas, importad
   domínios que não casam aparecem na importação.
 - Os pesos da fórmula de saúde são uma escolha normativa explícita e abertos a
   debate. Não são uma verdade empírica.
-- O cartograma aproxima a geografia; não é um mapa em escala.
+- O cartograma do Brasil aproxima a geografia; não é um mapa em escala.
+- A expedição prova tempo **fora da aba**, não engajamento real. É um
+  sinal honesto e leve, e não substitui dados verificados (importação ou conector).
+- A população em ordem de grandeza só foi preenchida onde há divulgação
+  ampla; o resto aparece como incerto (`?`).
 - Dados simulados do mapa do Brasil existem só para demonstração e são
   sempre rotulados.

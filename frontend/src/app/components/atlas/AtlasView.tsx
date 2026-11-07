@@ -1,58 +1,64 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Award, BarChart3, Cloud, CloudOff, Map as MapIcon, Plug, Sparkles, X } from "lucide-react";
+import { Award, BarChart3, BookOpen, Cloud, CloudOff, Compass, Globe2, Map as MapIcon, Plug, X } from "lucide-react";
 import { track } from "@/app/lib/atlas/analytics";
+import { PLACE_BY_ID } from "@/app/lib/atlas/catalog";
 import { formatMinutes } from "@/app/lib/atlas/metrics";
+import { REALMS, randomExpedition } from "@/app/lib/atlas/world";
 import { AchievementsPanel } from "./AchievementsPanel";
 import { AnalyticsPanel } from "./AnalyticsPanel";
 import { BrazilPanel } from "./BrazilPanel";
+import { ConnectorsPanel } from "./ConnectorsPanel";
+import { EchoDialog } from "./EchoDialog";
+import { ExpeditionDialog } from "./ExpeditionDialog";
 import { IntegrationsPanel } from "./IntegrationsPanel";
-import { MultiversePanel } from "./MultiversePanel";
-import { PersonalMap } from "./PersonalMap";
+import { JournalPanel } from "./JournalPanel";
 import { PlaceDrawer } from "./PlaceDrawer";
 import { ProgressBar, StatTile } from "./ui";
 import { useAtlas } from "./useAtlas";
+import { WorldMap } from "./WorldMap";
 
-type Tab = "map" | "multiverse" | "brazil" | "achievements" | "analytics" | "integrations";
+type Tab = "world" | "journal" | "brazil" | "achievements" | "analytics" | "connections";
 
 const TABS: { id: Tab; label: string; icon: typeof MapIcon }[] = [
-    { id: "map", label: "Meu mapa", icon: MapIcon },
-    { id: "multiverse", label: "Multiverso", icon: Sparkles },
+    { id: "world", label: "Mundo", icon: Globe2 },
+    { id: "journal", label: "Diário", icon: BookOpen },
     { id: "brazil", label: "Brasil", icon: MapIcon },
     { id: "achievements", label: "Conquistas", icon: Award },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
-    { id: "integrations", label: "Integrações", icon: Plug },
+    { id: "connections", label: "Conexões", icon: Plug },
 ];
 
 export function AtlasView() {
     const atlas = useAtlas();
-    const { state, usage, metrics, projectedMetrics, game, actions } = atlas;
-    const [tab, setTab] = useState<Tab>("map");
+    const { state, usage, discovered, realms, world, rumors, metrics, projectedMetrics, game, actions } = atlas;
+    const [tab, setTab] = useState<Tab>("world");
     const [selected, setSelected] = useState<string | null>(null);
+    const [expedition, setExpedition] = useState<string | null>(null);
+    const [echo, setEcho] = useState<string | null>(null);
 
     useEffect(() => {
         track("tab_viewed", { tab });
     }, [tab]);
 
-    // Primeira visita sem dados: leva direto para as integrações.
-    useEffect(() => {
-        if (atlas.loaded && usage.length === 0 && Object.keys(state.explored).length === 0) setTab("integrations");
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [atlas.loaded]);
+    const startExpedition = (placeId: string) => {
+        setSelected(null);
+        setExpedition(placeId);
+    };
 
     const badgeNames = game.badges.filter((b) => atlas.newBadges.includes(b.id)).map((b) => b.name);
+    const blank = discovered.size === 0;
 
     return (
         <div className="h-full overflow-y-auto bg-[#fafaf8]">
             <div className="mx-auto max-w-6xl px-4 py-6 md:px-8">
-                {/* Cabeçalho + progresso */}
                 <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                     <div>
                         <h1 className="font-serif text-4xl font-light text-gray-900">Atlas Digital</h1>
                         <p className="mt-1 max-w-xl text-sm text-gray-600">
-                            Veja onde sua atenção mora, conheça cada lugar — e decida se fica ou muda de rota.
-                            Existem infinitos outros lugares no multiverso digital.
+                            Um mapa do seu território digital — e do multiverso que você ainda não pisou. O desconhecido
+                            fica hachurado até você ir lá.
                         </p>
                     </div>
                     <div className="w-full rounded-xl border border-gray-200 bg-white p-3 md:w-72">
@@ -73,71 +79,94 @@ export function AtlasView() {
 
                 {badgeNames.length > 0 && (
                     <div className="mt-4 flex items-center justify-between rounded-xl border border-gray-900 bg-white px-4 py-3 text-sm">
-                        <span>
-                            <Award className="mr-1.5 inline h-4 w-4" />
-                            Nova conquista: <strong>{badgeNames.join(", ")}</strong>
-                        </span>
-                        <button onClick={actions.dismissBadges} aria-label="Fechar" className="rounded p-1 hover:bg-gray-100">
-                            <X className="h-4 w-4" />
-                        </button>
+                        <span><Award className="mr-1.5 inline h-4 w-4" /> Nova conquista: <strong>{badgeNames.join(", ")}</strong></span>
+                        <button onClick={actions.dismissBadges} aria-label="Fechar" className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" /></button>
                     </div>
                 )}
 
-                {/* Abas */}
                 <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-gray-200" role="tablist">
                     {TABS.map(({ id, label, icon: Icon }) => (
-                        <button
-                            key={id}
-                            role="tab"
-                            aria-selected={tab === id}
-                            onClick={() => setTab(id)}
-                            className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                                tab === id ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-800"
-                            }`}
-                        >
+                        <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
+                            className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${tab === id ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-800"}`}>
                             <Icon className="h-4 w-4" /> {label}
                         </button>
                     ))}
                 </nav>
 
                 <div className="mt-6">
-                    {tab === "map" && (
+                    {tab === "world" && (
                         <div className="space-y-4">
+                            {blank && (
+                                <div className="flex flex-col gap-3 rounded-2xl border border-[#d8c9a3] bg-[#f8f1df] p-5 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <h2 className="font-serif text-2xl text-[#2b2216]">Todo o mundo está sob a hachura</h2>
+                                        <p className="text-sm text-[#5b4a32]">
+                                            Revele o território que você já habita trazendo seus dados — ou atravesse a hachura numa expedição.
+                                        </p>
+                                    </div>
+                                    <div className="flex shrink-0 gap-2">
+                                        <button onClick={() => setTab("connections")} className="rounded-lg border border-[#2b2216] px-3 py-2 text-sm text-[#2b2216]">Trazer meus dados</button>
+                                        <button onClick={() => {
+                                                const target = randomExpedition(discovered, Date.now());
+                                                if (target) startExpedition(target);
+                                            }}
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#2b2216] px-3 py-2 text-sm text-[#f3e9d2]">
+                                            <Compass className="h-4 w-4" /> Primeira expedição
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                                <StatTile label="Territórios revelados" value={`${discovered.size}/${metrics.catalogSize}`} hint={`${realms.size} de ${REALMS.length} reinos`} />
                                 <StatTile label="Tempo semanal" value={usage.length ? formatMinutes(metrics.totalWeeklyMinutes) : "—"} />
                                 <StatTile label="Atenção saudável" value={usage.length ? String(metrics.healthyAttention) : "—"} hint="0–100, ponderado pelo tempo" />
-                                <StatTile label="Diversidade" value={usage.length ? String(metrics.diversity) : "—"} hint="Equilíbrio entre bairros" />
-                                <StatTile label="Lugares explorados" value={`${metrics.explored}/${metrics.catalogSize}`} hint={`${metrics.categoriesUsed} de 8 bairros com presença`} />
+                                <StatTile label="Diversidade" value={usage.length ? String(metrics.diversity) : "—"} hint="Equilíbrio entre reinos" />
                             </div>
-                            <PersonalMap
-                                usage={usage}
+                            <WorldMap
                                 state={state}
+                                usage={usage}
+                                discovered={discovered}
+                                realms={realms}
+                                world={world}
+                                rumors={rumors}
+                                justRevealed={atlas.justRevealed}
                                 selected={selected}
                                 onSelect={setSelected}
-                                onOpenMultiverse={() => setTab("multiverse")}
+                                onExpedition={startExpedition}
                             />
                             <p className="text-xs text-gray-500">
-                                Clique em qualquer lugar — inclusive os da névoa — para conhecê-lo, ver alternativas e decidir sua rota.
+                                Arraste para navegar, use a roda do mouse ou os botões para aproximar. Clique numa terra hachurada para partir em expedição.
                             </p>
                         </div>
                     )}
-                    {tab === "multiverse" && (
-                        <MultiversePanel state={state} usage={usage} metrics={metrics} projectedMetrics={projectedMetrics} onSelect={setSelected} />
+                    {tab === "journal" && (
+                        <JournalPanel state={state} discovered={discovered} realms={realms} metrics={metrics} projectedMetrics={projectedMetrics} onSelect={setSelected} onExpedition={startExpedition} />
                     )}
                     {tab === "brazil" && <BrazilPanel state={state} metrics={metrics} onSetBrazil={actions.setBrazil} />}
                     {tab === "achievements" && <AchievementsPanel game={game} />}
                     {tab === "analytics" && <AnalyticsPanel usage={usage} metrics={metrics} />}
-                    {tab === "integrations" && (
-                        <IntegrationsPanel
-                            state={state}
-                            onImport={actions.importResult}
-                            onSaveManual={(r) => {
-                                actions.saveManual(r);
-                                setTab("map");
-                            }}
-                            onRemoveSource={actions.removeSource}
-                            onDeleteEverything={actions.deleteEverything}
-                        />
+                    {tab === "connections" && (
+                        <div className="space-y-6">
+                            <ConnectorsPanel
+                                state={state}
+                                discovered={discovered}
+                                onConnect={actions.connect}
+                                onDisconnect={actions.disconnect}
+                                onWriteBack={actions.setWriteBack}
+                                onCaravan={actions.setCaravan}
+                                onReplaceState={actions.replaceState}
+                            />
+                            <IntegrationsPanel
+                                state={state}
+                                onImport={actions.importResult}
+                                onSaveManual={(r) => {
+                                    actions.saveManual(r);
+                                    setTab("world");
+                                }}
+                                onRemoveSource={actions.removeSource}
+                                onDeleteEverything={actions.deleteEverything}
+                            />
+                        </div>
                     )}
                 </div>
             </div>
@@ -149,13 +178,43 @@ export function AtlasView() {
                         placeId={selected}
                         usage={usage}
                         state={state}
+                        discovered={discovered}
+                        realms={realms}
+                        world={world}
+                        rumors={rumors}
                         onClose={() => setSelected(null)}
                         onDecide={actions.decide}
-                        onToggleExplored={actions.toggleExplored}
                         onSelect={setSelected}
+                        onExpedition={startExpedition}
+                        onLantern={actions.toggleLantern}
+                        onEcho={setEcho}
                     />
                 </>
             )}
+            {expedition && (
+                <ExpeditionDialog
+                    placeId={expedition}
+                    realmKnown={realms.has(PLACE_BY_ID[expedition].category)}
+                    rumor={rumors[expedition]}
+                    onDiscover={(id) => actions.discover(id, "expedition")}
+                    onEcho={(id) => {
+                        setExpedition(null);
+                        setEcho(id);
+                    }}
+                    onClose={() => setExpedition(null)}
+                />
+            )}
+            {echo && <EchoDialog placeId={echo} state={state} onEcho={actions.echo} onClose={() => setEcho(null)} />}
+
+            {/* Avisos (descobertas devolvidas, erros de conectores) */}
+            <div className="pointer-events-none fixed bottom-4 left-1/2 z-[150] flex w-full max-w-md -translate-x-1/2 flex-col gap-2 px-4">
+                {atlas.notices.map((n) => (
+                    <div key={n.id} className={`pointer-events-auto rounded-lg px-4 py-2.5 text-sm shadow-lg ${n.kind === "error" ? "bg-red-700 text-white" : "bg-[#2b2216] text-[#f3e9d2]"}`}>
+                        {n.text}
+                        {n.url && <a href={n.url} target="_blank" rel="noreferrer" className="ml-2 underline">ver</a>}
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }

@@ -868,3 +868,42 @@ export async function getAtlasAnalyticsOverview(): Promise<{
 }> {
     return apiRequest("/atlas/analytics/overview");
 }
+
+export interface AtlasWorldStats {
+    travelers: number | null;
+    verified: number | null;
+    lanterns: number | null;
+    echoes: number | null;
+}
+
+export async function getAtlasWorld(): Promise<{ k: number; places: Record<string, AtlasWorldStats> }> {
+    return apiRequest("/atlas/world");
+}
+
+export async function syncAtlasDiscoveries(
+    discoveries: { placeId: string; method: string; verified: boolean; at: string }[],
+): Promise<void> {
+    await apiRequest<void>("/atlas/discoveries", jsonInit("PUT", { discoveries }));
+}
+
+export async function syncAtlasMarks(lanterns: string[], echoes: Record<string, number>): Promise<void> {
+    await apiRequest<void>("/atlas/marks", jsonInit("PUT", { lanterns, echoes }));
+}
+
+export async function getAtlasProfile(): Promise<{ profile: { handle: string; isPublic: boolean } | null }> {
+    return apiRequest("/atlas/profile");
+}
+
+export async function saveAtlasProfile(handle: string, isPublic: boolean): Promise<void> {
+    await apiRequest<void>("/atlas/profile", jsonInit("PUT", { handle, isPublic }));
+}
+
+export async function setAtlasCaravan(handles: string[]): Promise<{ joined: string[]; notFound: string[] }> {
+    return apiRequest("/atlas/caravan", jsonInit("PUT", { handles }));
+}
+
+export async function getAtlasCaravan(): Promise<{
+    members: { handle: string; isPublic: boolean; discoveries: string[] }[];
+}> {
+    return apiRequest("/atlas/caravan");
+}

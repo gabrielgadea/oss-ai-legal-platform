@@ -141,6 +141,11 @@ export const ATLAS_EVENT_NAMES = new Set([
   "badge_earned",
   "brazil_contribution_toggled",
   "data_deleted",
+  "expedition_started",
+  "echoed",
+  "lantern_toggled",
+  "connector_connected",
+  "caravan_updated",
 ]);
 
 export interface AtlasEventIn {
@@ -177,7 +182,9 @@ export const ATLAS_FUNNEL: { step: string; event: string }[] = [
   { step: "Abriu o Atlas", event: "atlas_viewed" },
   { step: "Registrou atividade", event: "manual_estimate_saved|import_succeeded" },
   { step: "Explorou um lugar", event: "place_explored" },
+  { step: "Partiu em expedição", event: "expedition_started" },
   { step: "Decidiu uma rota", event: "route_decided" },
+  { step: "Ecoou uma descoberta", event: "echoed" },
 ];
 
 export function summarizeEvents(rows: { user_id: string; name: string }[]) {
@@ -197,4 +204,114 @@ export function summarizeEvents(rows: { user_id: string; name: string }[]) {
     return { step, users: users.size };
   });
   return { events, funnel };
+}
+
+// ---------------------------------------------------------------------------
+// Mundo compartilhado: descobertas, lanternas, ecos e caravanas
+// ---------------------------------------------------------------------------
+
+export const ATLAS_WORLD_K = 5;
+const PLACE_ID_RE = /^[a-z0-9-]{1,40}$/;
+const METHODS = new Set(["expedition", "import", "connector", "manual"]);
+
+export interface DiscoveryIn {
+  place_id: string;
+  method: string;
+  verified: boolean;
+  discovered_at: string;
+}
+
+export function parseDiscoveries(body: unknown, max = 200): DiscoveryIn[] {
+  const list = (body as { discoveries?: unknown })?.discoveries;
+  if (!Array.isArray(list)) return [];
+  const out = new Map<string, DiscoveryIn>();
+  for (const d of list.slice(0, max)) {
+    if (!d || typeof d !== "object") continue;
+    const r = d as Record<string, unknown>;
+    const place_id = String(r.placeId ?? "");
+    const method = String(r.method ?? "");
+    if (!PLACE_ID_RE.test(place_id) || !METHODS.has(method)) continue;
+    const at = typeof r.at === "string" && !Number.isNaN(Date.parse(r.at)) ? r.at : new Date().toISOString();
+    out.set(place_id, { place_id, method, verified: r.verified === true, discovered_at: at });
+  }
+  return [...out.values()];
+}
+
+export interface MarkIn {
+  place_id: string;
+  lantern: boolean;
+  echoes: number;
+}
+
+export function parseMarks(body: unknown, max = 200): MarkIn[] {
+  const b = (body ?? {}) as { lanterns?: unknown; echoes?: unknown };
+  const map = new Map<string, MarkIn>();
+  const get = (id: string) => map.get(id) ?? { place_id: id, lantern: false, echoes: 0 };
+  if (Array.isArray(b.lanterns)) {
+    for (const id of b.lanterns.slice(0, max)) {
+      if (typeof id === "string" && PLACE_ID_RE.test(id)) map.set(id, { ...get(id), lantern: true });
+    }
+  }
+  if (b.echoes && typeof b.echoes === "object") {
+    for (const [id, n] of Object.entries(b.echoes as Record<string, unknown>).slice(0, max)) {
+      const v = Math.max(0, Math.min(1000, Math.round(Number(n))));
+      if (PLACE_ID_RE.test(id) && Number.isFinite(v) && v > 0) map.set(id, { ...get(id), echoes: v });
+    }
+  }
+  return [...map.values()];
+}
+
+export function normalizeHandle(input: unknown): string | null {
+  const h = String(input ?? "").trim().replace(/^@/, "").toLowerCase();
+  return /^[a-z0-9_]{3,24}$/.test(h) ? h : null;
+}
+
+export interface PlaceWorldStats {
+  travelers: number | null;
+  verified: number | null;
+  lanterns: number | null;
+  echoes: number | null;
+}
+
+/** Contagem abaixo de k vira null ("poucos viajantes"), para não expor ninguém. */
+const kAnon = (n: number, k: number) => (n >= k ? n : null);
+
+export function aggregateWorld(
+  discoveries: { user_id: string; place_id: string; verified: boolean }[],
+  marks: { user_id: string; place_id: string; lantern: boolean; echoes: number }[],
+  k = ATLAS_WORLD_K,
+): Record<string, PlaceWorldStats> {
+  const acc = new Map<string, { travelers: Set<string>; verified: Set<string>; lanterns: number; echoes: number; echoers: Set<string> }>();
+  const get = (id: string) => {
+    let a = acc.get(id);
+    if (!a) {
+      a = { travelers: new Set(), verified: new Set(), lanterns: 0, echoes: 0, echoers: new Set() };
+      acc.set(id, a);
+    }
+    return a;
+  };
+  for (const d of discoveries) {
+    const a = get(d.place_id);
+    a.travelers.add(d.user_id);
+    if (d.verified) a.verified.add(d.user_id);
+  }
+  for (const m of marks) {
+    const a = get(m.place_id);
+    if (m.lantern) a.lanterns++;
+    if (m.echoes > 0) {
+      a.echoes += m.echoes;
+      a.echoers.add(m.user_id);
+    }
+  }
+  const out: Record<string, PlaceWorldStats> = {};
+  for (const [id, a] of acc) {
+    out[id] = {
+      travelers: kAnon(a.travelers.size, k),
+      verified: kAnon(a.verified.size, k),
+      lanterns: kAnon(a.lanterns, k),
+      // ecos só aparecem quando vêm de pelo menos k pessoas distintas
+      echoes: a.echoers.size >= k ? a.echoes : null,
+    };
+  }
+  return out;
 }

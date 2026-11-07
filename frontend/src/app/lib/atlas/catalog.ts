@@ -117,6 +117,7 @@ export const PLACES: Place[] = [
     // ── Praça (redes sociais) ────────────────────────────────────────────
     {
         id: "instagram",
+        population: 5,
         name: "Instagram",
         category: "social",
         tagline: "Fotos, stories e Reels.",
@@ -132,6 +133,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "facebook",
+        population: 5,
         name: "Facebook",
         category: "social",
         tagline: "Grupos, páginas e feed de amigos.",
@@ -147,6 +149,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "x",
+        population: 4,
         name: "X (Twitter)",
         category: "social",
         tagline: "Microblog e debate público em tempo real.",
@@ -163,6 +166,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "threads",
+        population: 4,
         name: "Threads",
         category: "social",
         tagline: "Conversas em texto da Meta.",
@@ -187,6 +191,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "reddit",
+        population: 4,
         name: "Reddit",
         category: "social",
         tagline: "Comunidades temáticas com votação.",
@@ -200,6 +205,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "pinterest",
+        population: 4,
         name: "Pinterest",
         category: "social",
         tagline: "Murais de inspiração visual.",
@@ -209,6 +215,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "mastodon",
+        entry: "https://joinmastodon.org",
         name: "Mastodon",
         category: "social",
         tagline: "Microblog federado, sem dono único.",
@@ -225,6 +232,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "bluesky",
+        population: 3,
         name: "Bluesky",
         category: "social",
         tagline: "Microblog com feeds escolhidos por você.",
@@ -241,6 +249,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "pixelfed",
+        entry: "https://pixelfed.org",
         name: "Pixelfed",
         category: "social",
         tagline: "Fotos no fediverso, em ordem cronológica.",
@@ -258,6 +267,7 @@ export const PLACES: Place[] = [
     // ── Cinema (vídeo) ───────────────────────────────────────────────────
     {
         id: "youtube",
+        population: 5,
         name: "YouTube",
         category: "video",
         tagline: "Vídeos longos, Shorts e lives.",
@@ -274,6 +284,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "tiktok",
+        population: 5,
         name: "TikTok",
         category: "video",
         tagline: "Vídeos curtos por recomendação.",
@@ -302,6 +313,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "netflix",
+        population: 4,
         name: "Netflix",
         category: "video",
         tagline: "Séries e filmes por assinatura.",
@@ -324,6 +336,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "twitch",
+        population: 4,
         name: "Twitch",
         category: "video",
         tagline: "Transmissões ao vivo.",
@@ -349,6 +362,7 @@ export const PLACES: Place[] = [
     // ── Correio (mensagens) ──────────────────────────────────────────────
     {
         id: "whatsapp",
+        population: 5,
         name: "WhatsApp",
         category: "messaging",
         tagline: "O mensageiro onipresente no Brasil.",
@@ -397,6 +411,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "discord",
+        population: 4,
         name: "Discord",
         category: "messaging",
         tagline: "Servidores de comunidade com voz e texto.",
@@ -422,6 +437,8 @@ export const PLACES: Place[] = [
     },
     {
         id: "gmail",
+        entry: "https://mail.google.com",
+        population: 5,
         name: "Gmail",
         category: "messaging",
         tagline: "E-mail do Google.",
@@ -449,6 +466,7 @@ export const PLACES: Place[] = [
     // ── Biblioteca (conhecimento) ────────────────────────────────────────
     {
         id: "google-search",
+        population: 5,
         name: "Google Busca",
         category: "knowledge",
         tagline: "O buscador dominante.",
@@ -469,6 +487,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "wikipedia",
+        entry: "https://pt.wikipedia.org",
         name: "Wikipédia",
         category: "knowledge",
         tagline: "A enciclopédia livre e colaborativa.",
@@ -483,6 +502,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "openstreetmap",
+        entry: "https://www.openstreetmap.org",
         name: "OpenStreetMap",
         category: "knowledge",
         tagline: "Mapa do mundo feito por voluntários.",
@@ -497,6 +517,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "google-maps",
+        population: 5,
         name: "Google Maps",
         category: "knowledge",
         tagline: "Mapas, rotas e avaliações locais.",
@@ -507,6 +528,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "khan-academy",
+        entry: "https://pt.khanacademy.org",
         name: "Khan Academy",
         category: "knowledge",
         tagline: "Educação gratuita sem fins lucrativos.",
@@ -516,6 +538,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "duolingo",
+        population: 4,
         name: "Duolingo",
         category: "knowledge",
         tagline: "Idiomas em lições gamificadas.",
@@ -554,6 +577,8 @@ export const PLACES: Place[] = [
     // ── Rádio (áudio) ────────────────────────────────────────────────────
     {
         id: "spotify",
+        entry: "https://open.spotify.com",
+        population: 4,
         name: "Spotify",
         category: "audio",
         tagline: "Música e podcasts por streaming.",
@@ -643,6 +668,8 @@ export const PLACES: Place[] = [
     // ── Ágora (cidadania) ────────────────────────────────────────────────
     {
         id: "govbr",
+        entry: "https://www.gov.br",
+        population: 4,
         name: "gov.br",
         category: "civic",
         tagline: "Portal único de serviços do governo federal.",
@@ -655,7 +682,7 @@ export const PLACES: Place[] = [
         name: "Meu SUS Digital",
         category: "civic",
         tagline: "Histórico de saúde, vacinas e exames no SUS.",
-        domains: ["meusus.saude.gov.br"],
+        domains: ["meususdigital.saude.gov.br"],
         origin: "BR",
         attributes: attrs({ businessModel: "public", infiniteFeed: false, autoplay: false }),
     },
@@ -690,6 +717,7 @@ export const PLACES: Place[] = [
     // ── Arena & Ateliê (jogos e criação) ─────────────────────────────────
     {
         id: "roblox",
+        population: 4,
         name: "Roblox",
         category: "play",
         tagline: "Mundos criados por usuários.",
@@ -699,6 +727,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "free-fire",
+        population: 4,
         name: "Free Fire",
         category: "play",
         tagline: "Battle royale mobile.",
@@ -708,6 +737,8 @@ export const PLACES: Place[] = [
     },
     {
         id: "steam",
+        entry: "https://store.steampowered.com",
+        population: 4,
         name: "Steam",
         category: "play",
         tagline: "Loja e comunidade de jogos de PC.",
@@ -740,6 +771,7 @@ export const PLACES: Place[] = [
     },
     {
         id: "canva",
+        population: 4,
         name: "Canva",
         category: "play",
         tagline: "Design gráfico simplificado.",
@@ -752,6 +784,19 @@ export const PLACES: Place[] = [
 export const PLACE_BY_ID: Record<string, Place> = Object.fromEntries(
     PLACES.map((p) => [p.id, p]),
 );
+
+/** Porta de entrada real usada pela expedição. */
+export function entryUrl(place: Place): string {
+    return place.entry ?? `https://${place.domains[0]}`;
+}
+
+export const POPULATION_LABELS: Record<number, string> = {
+    1: "menos de 1 milhão",
+    2: "1 a 10 milhões",
+    3: "10 a 100 milhões",
+    4: "100 milhões a 1 bilhão",
+    5: "mais de 1 bilhão",
+};
 
 export function placesInCategory(category: CategoryId): Place[] {
     return PLACES.filter((p) => p.category === category);

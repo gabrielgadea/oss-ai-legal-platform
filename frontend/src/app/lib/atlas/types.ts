@@ -83,6 +83,14 @@ export interface Place {
     attributes: PlaceAttributes;
     /** Observações de incerteza sobre os atributos. */
     notes?: string;
+    /** Porta de entrada da expedição (padrão: https://<primeiro domínio>). */
+    entry?: string;
+    /**
+     * População aproximada em ordem de grandeza de usuários ativos:
+     * 1 <1 mi · 2 1–10 mi · 3 10–100 mi · 4 100 mi–1 bi · 5 >1 bi.
+     * `undefined` = incerto (não inventamos).
+     */
+    population?: 1 | 2 | 3 | 4 | 5;
 }
 
 export type ScoreDimension = "privacy" | "attention" | "agency" | "openness";
@@ -155,6 +163,26 @@ export interface ImportResult {
 /** Decisão de rota da pessoa sobre um lugar. */
 export type RouteDecision = "stay" | "reduce" | "leave" | "explore";
 
+export type DiscoveryMethod = "expedition" | "import" | "connector" | "manual";
+
+export interface Discovery {
+    at: string;
+    method: DiscoveryMethod;
+    /** Verificada por dado externo (importação ou conector), não só declarada. */
+    verified: boolean;
+}
+
+/** Presença ativa num território: o que você produz e os laços que tem lá. */
+export interface Inhabitance {
+    posts?: number;
+    followers?: number;
+    following?: number;
+    via: string;
+    at: string;
+}
+
+export type ConnectorId = "mastodon" | "bluesky";
+
 export interface AtlasState {
     version: 1;
     /** Chave: `${source}:${placeId}`. */
@@ -166,6 +194,20 @@ export interface AtlasState {
     /** UF para contribuição opcional ao mapa do Brasil. */
     uf?: string;
     contributeToBrazilMap: boolean;
+    /** Territórios revelados e como foram revelados. */
+    discoveries: Record<string, Discovery>;
+    /** Lanternas acesas (equivalente a "curtir"). */
+    lanterns: Record<string, string>;
+    /** Ecos feitos por território (equivalente a "compartilhar"). */
+    echoes: Record<string, number>;
+    /** Handles de viajantes cuja caravana você acompanha ("seguir"). */
+    caravan: string[];
+    /** Dados de "habitar" trazidos pelos conectores. */
+    inhabit: Record<string, Inhabitance>;
+    /** Conectores ligados (só metadados públicos; tokens ficam fora do estado). */
+    connectors: Partial<Record<ConnectorId, { account: string; service: string; connectedAt: string }>>;
+    /** Devolver descobertas automaticamente às plataformas de origem. */
+    writeBack: Partial<Record<ConnectorId, boolean>>;
     updatedAt: string;
 }
 

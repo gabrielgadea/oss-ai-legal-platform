@@ -2,6 +2,11 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { createServerSupabase } from "../lib/supabase";
 import {
+  ATLAS_WORLD_K,
+  aggregateWorld,
+  normalizeHandle,
+  parseDiscoveries,
+  parseMarks,
   ATLAS_K_ANONYMITY,
   ATLAS_WINDOW_DAYS,
   aggregateByUF,
@@ -63,6 +68,10 @@ atlasRouter.delete("/state", requireAuth, async (_req, res) => {
   const results = await Promise.all([
     db.from("atlas_states").delete().eq("user_id", userId),
     db.from("atlas_events").delete().eq("user_id", userId),
+    db.from("atlas_discoveries").delete().eq("user_id", userId),
+    db.from("atlas_marks").delete().eq("user_id", userId),
+    db.from("atlas_caravans").delete().eq("follower_id", userId),
+    db.from("atlas_profiles").delete().eq("user_id", userId),
   ]);
   const failed = results.find((r) => r.error);
   if (failed?.error) return void res.status(500).json({ detail: failed.error.message });
@@ -130,4 +139,125 @@ atlasRouter.get("/analytics/overview", requireAuth, async (_req, res) => {
     .limit(100_000);
   if (error) return void res.status(500).json({ detail: error.message });
   res.json({ windowDays: ANALYTICS_WINDOW_DAYS, ...summarizeEvents(data ?? []) });
+});
+
+// ---------------------------------------------------------------------------
+// Mundo compartilhado
+// ---------------------------------------------------------------------------
+
+// PUT /atlas/discoveries — sincroniza os territórios revelados
+atlasRouter.put("/discoveries", requireAuth, async (req, res) => {
+  const userId = res.locals.userId as string;
+  const rows = parseDiscoveries(req.body).map((d) => ({ ...d, user_id: userId }));
+  if (rows.length === 0) return void res.status(204).send();
+  const db = createServerSupabase();
+  const { error } = await db.from("atlas_discoveries").upsert(rows, { onConflict: "user_id,place_id" });
+  if (error) return void res.status(500).json({ detail: error.message });
+  res.status(204).send();
+});
+
+// PUT /atlas/marks — substitui o conjunto de lanternas e ecos da pessoa
+atlasRouter.put("/marks", requireAuth, async (req, res) => {
+  const userId = res.locals.userId as string;
+  const rows = parseMarks(req.body).map((m) => ({ ...m, user_id: userId, updated_at: new Date().toISOString() }));
+  const db = createServerSupabase();
+  const del = await db.from("atlas_marks").delete().eq("user_id", userId);
+  if (del.error) return void res.status(500).json({ detail: del.error.message });
+  if (rows.length) {
+    const { error } = await db.from("atlas_marks").insert(rows);
+    if (error) return void res.status(500).json({ detail: error.message });
+  }
+  res.status(204).send();
+});
+
+// GET /atlas/world — população, lanternas e ecos por território (k-anônimo)
+atlasRouter.get("/world", requireAuth, async (_req, res) => {
+  const db = createServerSupabase();
+  const [d, m] = await Promise.all([
+    db.from("atlas_discoveries").select("user_id, place_id, verified").limit(200_000),
+    db.from("atlas_marks").select("user_id, place_id, lantern, echoes").limit(200_000),
+  ]);
+  const failed = d.error ?? m.error;
+  if (failed) return void res.status(500).json({ detail: failed.message });
+  res.json({ k: ATLAS_WORLD_K, places: aggregateWorld(d.data ?? [], m.data ?? []) });
+});
+
+// GET /atlas/profile
+atlasRouter.get("/profile", requireAuth, async (_req, res) => {
+  const userId = res.locals.userId as string;
+  const db = createServerSupabase();
+  const { data, error } = await db
+    .from("atlas_profiles")
+    .select("handle, is_public")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return void res.status(500).json({ detail: error.message });
+  res.json({ profile: data ? { handle: data.handle, isPublic: data.is_public } : null });
+});
+
+// PUT /atlas/profile — handle de viajante e visibilidade dos rumores
+atlasRouter.put("/profile", requireAuth, async (req, res) => {
+  const userId = res.locals.userId as string;
+  const handle = normalizeHandle(req.body?.handle);
+  if (!handle) return void res.status(400).json({ detail: "Handle: 3 a 24 caracteres, letras minúsculas, números ou _" });
+  const db = createServerSupabase();
+  const { error } = await db.from("atlas_profiles").upsert(
+    { user_id: userId, handle, is_public: req.body?.isPublic === true, updated_at: new Date().toISOString() },
+    { onConflict: "user_id" },
+  );
+  if (error) {
+    const taken = error.code === "23505";
+    return void res.status(taken ? 409 : 500).json({ detail: taken ? "Este handle já tem dono" : error.message });
+  }
+  res.status(204).send();
+});
+
+// PUT /atlas/caravan — define as caravanas que a pessoa acompanha
+atlasRouter.put("/caravan", requireAuth, async (req, res) => {
+  const userId = res.locals.userId as string;
+  const handles = (Array.isArray(req.body?.handles) ? req.body.handles : [])
+    .map(normalizeHandle)
+    .filter((h: string | null): h is string => Boolean(h))
+    .slice(0, 50);
+  const db = createServerSupabase();
+  const leaders = handles.length
+    ? await db.from("atlas_profiles").select("user_id, handle").in("handle", handles)
+    : { data: [], error: null };
+  if (leaders.error) return void res.status(500).json({ detail: leaders.error.message });
+  const del = await db.from("atlas_caravans").delete().eq("follower_id", userId);
+  if (del.error) return void res.status(500).json({ detail: del.error.message });
+  const rows = (leaders.data ?? [])
+    .filter((l) => l.user_id !== userId)
+    .map((l) => ({ follower_id: userId, leader_id: l.user_id }));
+  if (rows.length) {
+    const { error } = await db.from("atlas_caravans").insert(rows);
+    if (error) return void res.status(500).json({ detail: error.message });
+  }
+  const found = new Set((leaders.data ?? []).map((l) => l.handle));
+  res.json({ joined: [...found], notFound: handles.filter((h: string) => !found.has(h)) });
+});
+
+// GET /atlas/caravan — rumores: o que as caravanas públicas já desbravaram
+atlasRouter.get("/caravan", requireAuth, async (_req, res) => {
+  const userId = res.locals.userId as string;
+  const db = createServerSupabase();
+  const links = await db.from("atlas_caravans").select("leader_id").eq("follower_id", userId);
+  if (links.error) return void res.status(500).json({ detail: links.error.message });
+  const ids = (links.data ?? []).map((l) => l.leader_id);
+  if (ids.length === 0) return void res.json({ members: [] });
+  const [profiles, disc] = await Promise.all([
+    db.from("atlas_profiles").select("user_id, handle, is_public").in("user_id", ids),
+    db.from("atlas_discoveries").select("user_id, place_id").in("user_id", ids),
+  ]);
+  const failed = profiles.error ?? disc.error;
+  if (failed) return void res.status(500).json({ detail: failed.message });
+  const members = (profiles.data ?? []).map((p) => ({
+    handle: p.handle,
+    isPublic: p.is_public,
+    // só quem tornou o perfil público compartilha rumores
+    discoveries: p.is_public
+      ? (disc.data ?? []).filter((d) => d.user_id === p.user_id).map((d) => d.place_id)
+      : [],
+  }));
+  res.json({ members });
 });

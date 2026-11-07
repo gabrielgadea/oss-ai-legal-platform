@@ -19,6 +19,11 @@ export const ATLAS_EVENTS = [
     "badge_earned",
     "brazil_contribution_toggled",
     "data_deleted",
+    "expedition_started",
+    "echoed",
+    "lantern_toggled",
+    "connector_connected",
+    "caravan_updated",
 ] as const;
 
 export type AtlasEventName = (typeof ATLAS_EVENTS)[number];

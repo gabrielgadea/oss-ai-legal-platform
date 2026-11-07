@@ -8,6 +8,7 @@ Open-source release containing the Mike frontend and backend.
 - `backend/` - Express API, Supabase access, document processing, and migrations
 - `backend/migrations/000_one_shot_schema.sql` - one-shot Supabase schema for fresh databases
 - `backend/migrations/001_atlas_digital.sql` - Atlas Digital tables (apply after the base schema)
+- `backend/migrations/002_atlas_world.sql` - Atlas Digital shared world: discoveries, lanterns, echoes, caravans (apply after 001)
 - `docs/atlas-digital.md` - Atlas Digital: digital-activity map, methodology, privacy (LGPD)
 
 ## Setup

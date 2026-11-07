@@ -76,6 +76,36 @@ test("funil de produto", () => {
     { user_id: "b", name: "manual_estimate_saved" },
     { user_id: "a", name: "route_decided" },
   ]);
-  assert.deepEqual(s.funnel.map((f) => f.users), [2, 2, 0, 1]);
+  assert.deepEqual(s.funnel.map((f) => f.users), [2, 2, 0, 0, 1, 0]);
   assert.equal(s.events[0].name, "atlas_viewed");
+});
+
+import { aggregateWorld, normalizeHandle, parseDiscoveries, parseMarks } from "../src/lib/atlasAggregate";
+
+test("mundo: k-anonimato nas contagens de viajantes, lanternas e ecos", () => {
+  const disc = Array.from({ length: 5 }, (_, i) => ({ user_id: `u${i}`, place_id: "lichess", verified: i < 2 }));
+  disc.push({ user_id: "u9", place_id: "pixelfed", verified: true });
+  const marks = [
+    ...Array.from({ length: 5 }, (_, i) => ({ user_id: `u${i}`, place_id: "lichess", lantern: true, echoes: 2 })),
+    { user_id: "u9", place_id: "pixelfed", lantern: true, echoes: 40 },
+  ];
+  const w = aggregateWorld(disc, marks);
+  assert.deepEqual(w.lichess, { travelers: 5, verified: null, lanterns: 5, echoes: 10 });
+  assert.deepEqual(w.pixelfed, { travelers: null, verified: null, lanterns: null, echoes: null });
+});
+
+test("mundo: validação de descobertas, marcas e handles", () => {
+  const d = parseDiscoveries({ discoveries: [
+    { placeId: "mastodon", method: "expedition", verified: false, at: "2026-11-07T10:00:00Z" },
+    { placeId: "DROP TABLE", method: "expedition" },
+    { placeId: "x", method: "teleporte" },
+  ] });
+  assert.deepEqual(d.map((x) => x.place_id), ["mastodon"]);
+  const m = parseMarks({ lanterns: ["lichess", "../etc"], echoes: { lichess: 3, pixelfed: -2, wikipedia: 99999 } });
+  assert.deepEqual(m.find((x) => x.place_id === "lichess"), { place_id: "lichess", lantern: true, echoes: 3 });
+  assert.equal(m.find((x) => x.place_id === "wikipedia")!.echoes, 1000);
+  assert.equal(m.find((x) => x.place_id === "pixelfed"), undefined);
+  assert.equal(normalizeHandle("@Ana_Viajante"), "ana_viajante");
+  assert.equal(normalizeHandle("a"), null);
+  assert.equal(normalizeHandle("ana viajante"), null);
 });

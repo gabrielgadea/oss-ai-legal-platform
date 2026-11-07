@@ -16,6 +16,15 @@ export const XP_RULES = {
     perRouteDecision: 60,
     perBadge: 120,
     perMission: 200,
+    perExpedition: 60,
+    /** Lanternas e ecos rendem XP com teto, para não virar spam. */
+    perLantern: 10,
+    lanternCap: 10,
+    perEcho: 25,
+    echoCap: 8,
+    perCaravan: 50,
+    caravanCap: 5,
+    perBridge: 150,
 } as const;
 
 export const LEVELS = [
@@ -63,8 +72,20 @@ const ratio = (v: number, target: number) => Math.max(0, Math.min(1, v / target)
 
 function exploredIds(ctx: Ctx): string[] {
     return [
-        ...new Set([...ctx.usage.map((u) => u.placeId), ...Object.keys(ctx.state.explored)]),
+        ...new Set([
+            ...ctx.usage.map((u) => u.placeId),
+            ...Object.keys(ctx.state.explored),
+            ...Object.keys(ctx.state.discoveries ?? {}),
+        ]),
     ].filter((id) => PLACE_BY_ID[id]);
+}
+
+function expeditions(ctx: Ctx): number {
+    return Object.values(ctx.state.discoveries ?? {}).filter((d) => d.method === "expedition").length;
+}
+
+function echoCount(ctx: Ctx): number {
+    return Object.values(ctx.state.echoes ?? {}).reduce((a, b) => a + b, 0);
 }
 
 function computeBadges(ctx: Ctx): Badge[] {
@@ -104,7 +125,13 @@ function computeBadges(ctx: Ctx): Badge[] {
         b("living-library", "Biblioteca Viva", "Biblioteca ≥ 15% do seu tempo semanal.", hasData ? ratio(libraryShare, 15) : 0),
         b("traveler", "Viajante", "Explore 15 lugares diferentes.", ratio(ids.length, 15)),
         b("clearing-finder", "Achador de Clareiras", "Explore 5 lugares do tipo Clareira.", ratio(clareiras, 5)),
-        b("multiverse", "Multiverso", `Explore todos os ${CATEGORIES.length} bairros.`, ratio(cats, CATEGORIES.length)),
+        b("multiverse", "Multiverso", `Revele todos os ${CATEGORIES.length} reinos.`, ratio(cats, CATEGORIES.length)),
+        b("first-expedition", "Primeira Expedição", "Atravesse a hachura e revele um território indo até ele.", ratio(expeditions(ctx), 1)),
+        b("hatch-breaker", "Rompe-Hachuras", "Revele 10 territórios por expedição.", ratio(expeditions(ctx), 10)),
+        b("lamplighter", "Acendedor", "Acenda 5 lanternas em territórios que valeram a viagem.", ratio(Object.keys(ctx.state.lanterns ?? {}).length, 5)),
+        b("echo", "Eco", "Ecoe 3 descobertas para outras terras.", ratio(echoCount(ctx), 3)),
+        b("caravaneer", "Caravaneiro", "Junte-se à caravana de outro viajante.", ratio((ctx.state.caravan ?? []).length, 1)),
+        b("bridge", "Ponte", "Conecte uma plataforma para importar e devolver descobertas.", ratio(Object.keys(ctx.state.connectors ?? {}).length, 1)),
     ];
 }
 
@@ -131,8 +158,11 @@ function computeMissions(ctx: Ctx): Mission[] {
         mk("m-real-data", "Do palpite ao dado", "Importe um arquivo exportado de uma plataforma (direito de portabilidade).", ratio(realImports, 1)),
         mk("m-face-labyrinth", "Encare o labirinto", "Tome uma decisão de rota para cada Labirinto que você frequenta.",
             labyrinthUsed.length ? ratio(labyrinthDecided, labyrinthUsed.length) : 0),
-        mk("m-portal", "Atravesse um portal", "Escolha um destino alternativo no Multiverso para algum lugar.", ratio(withTarget, 1)),
-        mk("m-new-quarters", "Novos bairros", "Explore pelo menos 5 bairros diferentes.", ratio(cats, 5)),
+        mk("m-hatch", "Atravesse a hachura", "Revele 3 territórios desconhecidos por expedição.", ratio(expeditions(ctx), 3)),
+        mk("m-route", "Trace uma rota", "Defina um destino para sair (ou reduzir) de algum território.", ratio(withTarget, 1)),
+        mk("m-new-quarters", "Novos reinos", "Revele pelo menos 5 reinos diferentes.", ratio(cats, 5)),
+        mk("m-bridge", "Construa uma ponte", "Conecte uma plataforma e ative a devolução automática de descobertas.",
+            Object.values(ctx.state.writeBack ?? {}).some(Boolean) ? 1 : ratio(Object.keys(ctx.state.connectors ?? {}).length, 2)),
         mk("m-change", "Mude uma rota", "Decida reduzir ou migrar de 2 lugares.", ratio(changes, 2)),
     ];
 }
@@ -148,12 +178,23 @@ export function computeGameStatus(ctx: Ctx): GameStatus {
     const done = missions.filter((m) => m.done).length;
 
     const xpBreakdown = [
-        { label: "Lugares explorados", xp: ids.length * XP_RULES.perExploredPlace },
-        { label: "Bairros explorados", xp: cats * XP_RULES.perExploredCategory },
+        { label: "Territórios revelados", xp: ids.length * XP_RULES.perExploredPlace },
+        { label: "Reinos revelados", xp: cats * XP_RULES.perExploredCategory },
         { label: "Fontes de dados importadas", xp: importSources * XP_RULES.perImportSource },
         { label: "Decisões de rota", xp: decisions * XP_RULES.perRouteDecision },
         { label: "Conquistas", xp: earned * XP_RULES.perBadge },
         { label: "Missões", xp: done * XP_RULES.perMission },
+        { label: "Expedições", xp: expeditions(ctx) * XP_RULES.perExpedition },
+        {
+            label: "Lanternas acesas",
+            xp: Math.min(Object.keys(ctx.state.lanterns ?? {}).length, XP_RULES.lanternCap) * XP_RULES.perLantern,
+        },
+        { label: "Ecos", xp: Math.min(echoCount(ctx), XP_RULES.echoCap) * XP_RULES.perEcho },
+        {
+            label: "Caravanas",
+            xp: Math.min((ctx.state.caravan ?? []).length, XP_RULES.caravanCap) * XP_RULES.perCaravan,
+        },
+        { label: "Pontes com plataformas", xp: Object.keys(ctx.state.connectors ?? {}).length * XP_RULES.perBridge },
     ];
     const xp = xpBreakdown.reduce((s, x) => s + x.xp, 0);
     let idx = 0;

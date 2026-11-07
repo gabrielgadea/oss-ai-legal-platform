@@ -28,7 +28,7 @@ test("catálogo: resolução de domínios prefere o mais específico", () => {
     assert.equal(placeIdForUrl("https://www.youtube.com/watch?v=1"), "youtube");
     assert.equal(placeIdForUrl("https://mail.google.com/mail/u/0"), "gmail");
     assert.equal(placeIdForUrl("https://www.google.com/search?q=x"), "google-search");
-    assert.equal(placeIdForUrl("https://meusus.saude.gov.br/"), "meu-sus-digital");
+    assert.equal(placeIdForUrl("https://meususdigital.saude.gov.br/"), "meu-sus-digital");
     assert.equal(placeIdForUrl("https://servicos.gov.br/"), "govbr");
     assert.equal(placeIdForUrl("https://example.org"), null);
     assert.equal(placeIdForLabel("Wikipedia"), "wikipedia");
@@ -199,4 +199,139 @@ test("brasil: 27 UFs únicas, células únicas, contribuição arredondada", () 
     assert.equal(isoWeek(new Date("2021-01-01T12:00:00Z")), "2020-W53");
     assert.ok(!("placeId" in c));
     assert.ok(PLACE_BY_ID.whatsapp);
+});
+
+// ── Mundo RPG ─────────────────────────────────────────────────────────────
+import { generateWorld, discoveredSet, revealedRealms, visibilityOf, blindTarget, hiddenBetterAlternatives, epithet, EPITHET_GLOSSARY, REALMS, WORLD_W, WORLD_H } from "../world";
+import { discover, toggleLantern, addEcho, connect, setWriteBack, sanitizeState } from "../state";
+import { bookmarksHtml, expeditionIcs, linkFacets, discoveryPost, echoText, ECHO_TARGETS, passportJson, readPassport, mastodonVerify, mastodonPost, blueskyLogin, blueskyPost, fitText, normalizeInstance } from "../connectors";
+
+test("mundo: determinístico, dentro dos limites, um território por lugar", () => {
+    const a = generateWorld();
+    const b = generateWorld();
+    assert.deepEqual(a, b);
+    assert.equal(a.islands.length, 8);
+    assert.equal(a.territories.length, PLACES.length);
+    for (const t of a.territories) {
+        assert.ok(t.center.x > 0 && t.center.x < WORLD_W && t.center.y > 0 && t.center.y < WORLD_H, t.placeId);
+        const realm = REALMS.find((r) => r.id === t.realm)!;
+        assert.ok(Math.hypot(t.center.x - realm.center.x, t.center.y - realm.center.y) <= realm.radius, t.placeId);
+    }
+    // territórios do mesmo reino não se sobrepõem
+    for (const r of REALMS) {
+        const ts = a.territories.filter((t) => t.realm === r.id);
+        for (let i = 0; i < ts.length; i++)
+            for (let j = i + 1; j < ts.length; j++) {
+                const d = Math.hypot(ts[i].center.x - ts[j].center.x, ts[i].center.y - ts[j].center.y);
+                assert.ok(d >= ts[i].radius + ts[j].radius - 1, `${ts[i].placeId}×${ts[j].placeId}`);
+            }
+    }
+});
+
+test("mundo: visibilidade incógnita → silhueta → descoberto", () => {
+    let s = emptyState();
+    let set = discoveredSet(s, []);
+    assert.equal(visibilityOf("mastodon", set, revealedRealms(set)), "incognita");
+    s = discover(s, "instagram", "expedition");
+    set = discoveredSet(s, []);
+    assert.equal(visibilityOf("instagram", set, revealedRealms(set)), "discovered");
+    assert.equal(visibilityOf("mastodon", set, revealedRealms(set)), "silhouette");
+    assert.equal(visibilityOf("wikipedia", set, revealedRealms(set)), "incognita");
+    const target = blindTarget("social", set, 1)!;
+    assert.ok(target && !set.has(target) && PLACE_BY_ID[target].category === "social");
+    const hidden = hiddenBetterAlternatives("instagram", set);
+    assert.ok(hidden.includes("mastodon") && !hidden.includes("instagram"));
+});
+
+test("descoberta: verificada nunca é rebaixada; estado antigo é migrado", () => {
+    let s = discover(emptyState(), "x", "import");
+    s = discover(s, "x", "expedition");
+    assert.equal(s.discoveries.x.method, "import");
+    assert.equal(s.discoveries.x.verified, true);
+    const legacy = sanitizeState({ version: 1, records: {}, imports: [], explored: {}, decisions: {}, contributeToBrazilMap: false, updatedAt: "" })!;
+    assert.deepEqual(legacy.discoveries, {});
+    assert.deepEqual(legacy.caravan, []);
+});
+
+test("epítetos: derivados dos atributos, sem marca, todos no glossário", () => {
+    assert.equal(epithet(PLACE_BY_ID.mastodon), "Praça sem Coroa");
+    assert.equal(epithet(PLACE_BY_ID.tiktok), "Galeria de Espelhos sem Fim");
+    assert.equal(epithet(PLACE_BY_ID.signal), "Pombal dos Selos Abertos");
+    for (const p of PLACES) {
+        const e = epithet(p);
+        assert.ok(!e.toLowerCase().includes(p.name.toLowerCase()), p.id);
+        const q = Object.keys(EPITHET_GLOSSARY).find((k) => e.endsWith(k));
+        assert.ok(q, `${p.id}: ${e}`);
+    }
+});
+
+test("gamificação social: lanternas e ecos com teto", () => {
+    let s = emptyState();
+    for (const p of PLACES.slice(0, 30)) s = toggleLantern(addEcho(addEcho(s, p.id), p.id), p.id);
+    const g = computeGameStatus({ state: s, usage: [], metrics: computeMetrics([]) });
+    const lan = g.xpBreakdown.find((x) => x.label === "Lanternas acesas")!.xp;
+    const eco = g.xpBreakdown.find((x) => x.label === "Ecos")!.xp;
+    assert.equal(lan, 100);
+    assert.equal(eco, 200);
+});
+
+test("conectores: favoritos, agenda, passaporte, intents", () => {
+    const html = bookmarksHtml(["mastodon", "wikipedia"], new Date("2026-11-07T00:00:00Z"));
+    assert.ok(html.startsWith("<!DOCTYPE NETSCAPE-Bookmark-file-1>"));
+    assert.ok(html.includes('HREF="https://joinmastodon.org"'));
+    assert.ok(html.includes("Ilhas do Burburinho") && html.includes("Planalto das Torres"));
+    const ics = expeditionIcs("Vale dos Espelhos", new Date("2026-11-08T13:00:00Z"), "https://exemplo/atlas");
+    assert.ok(ics.includes("DTSTART:20261108T130000Z") && ics.includes("DTEND:20261108T133000Z"));
+    assert.ok(ics.includes("\r\nEND:VCALENDAR"));
+    assert.ok(!ics.includes("joinpeertube"), "agenda não revela o destino");
+    const st = discover(emptyState(), "lichess", "expedition");
+    assert.deepEqual(readPassport(passportJson(st))!.discoveries.lichess.method, "expedition");
+    assert.equal(readPassport("{}"), null);
+    const wa = ECHO_TARGETS.find((t) => t.id === "whatsapp")!.url("oi", "https://a.b");
+    assert.equal(wa, "https://wa.me/?text=oi%20https%3A%2F%2Fa.b");
+    assert.equal(ECHO_TARGETS.find((t) => t.id === "mastodon")!.url("oi", "https://a.b"), null);
+    assert.ok(ECHO_TARGETS.find((t) => t.id === "mastodon")!.url("oi", "https://a.b", { instance: "https://Mastodon.Social/@x" })!.startsWith("https://mastodon.social/share?text="));
+    assert.ok(echoText(PLACE_BY_ID.lichess).includes("Lichess"));
+    assert.equal(normalizeInstance(" https://ursal.zone/ "), "ursal.zone");
+});
+
+test("conectores: publicação respeita limites e facets em bytes UTF-8", () => {
+    for (const p of PLACES) {
+        assert.ok(Array.from(discoveryPost(p, 300)).length <= 300, p.id);
+        assert.ok(discoveryPost(p, 300).includes("#AtlasDigital"));
+    }
+    const text = "Território à vista: https://lichess.org fim";
+    const [f] = linkFacets(text);
+    const bytes = new TextEncoder().encode(text);
+    assert.equal(new TextDecoder().decode(bytes.slice(f.index.byteStart, f.index.byteEnd)), "https://lichess.org");
+    assert.equal(fitText("abcdef", 4), "abc…");
+});
+
+test("conectores: chamadas às APIs com o formato documentado", async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fake = (async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = url.includes("verify_credentials")
+            ? { acct: "ana", statuses_count: 12, followers_count: 30, following_count: 40 }
+            : url.includes("statuses") ? { url: "https://m.s/@ana/1" }
+            : url.includes("createSession") ? { accessJwt: "jwt", did: "did:plc:x", handle: "ana.bsky.social" }
+            : { uri: "at://did:plc:x/app.bsky.feed.post/1" };
+        return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const acc = await mastodonVerify("mastodon.social", "tok", fake);
+    assert.equal(acc.statuses_count, 12);
+    assert.equal(calls[0].url, "https://mastodon.social/api/v1/accounts/verify_credentials");
+    await mastodonPost("mastodon.social", "tok", "olá", fake);
+    assert.equal(JSON.parse(String(calls[1].init!.body)).status, "olá");
+    const sess = await blueskyLogin("@ana.bsky.social", "app-pass", undefined, fake);
+    assert.equal(calls[2].url, "https://bsky.social/xrpc/com.atproto.server.createSession");
+    assert.equal(JSON.parse(String(calls[2].init!.body)).identifier, "ana.bsky.social");
+    await blueskyPost(sess, "veja https://lichess.org", undefined, fake);
+    const rec = JSON.parse(String(calls[3].init!.body));
+    assert.equal(rec.collection, "app.bsky.feed.post");
+    assert.equal(rec.repo, "did:plc:x");
+    assert.equal(rec.record.facets.length, 1);
+    const st = setWriteBack(connect(emptyState(), "mastodon", { account: "ana", service: "mastodon.social" }, "mastodon", { posts: 12 }), "mastodon", true);
+    assert.equal(st.discoveries.mastodon.verified, true);
+    assert.equal(st.inhabit.mastodon.posts, 12);
 });
